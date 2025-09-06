@@ -8,43 +8,59 @@ export default function LoginPage() {
   const router = useRouter();
   const q = useSearchParams();
   const [email, setEmail] = useState('');
-  const [loading, setLoading] = useState(true); // block UI while we try to finish login
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     (async () => {
-      // 1) If we were redirected from the magic link, finish the exchange.
-      const code = q.get('code');
       const errorDescription = q.get('error_description');
-      if (errorDescription) {
-        alert(errorDescription);
-      }
+      if (errorDescription) alert(errorDescription);
+
+      // Newer flow: ?code=...
+      const code = q.get('code');
       if (code) {
-        const { error } = await supabase.auth.exchangeCodeForSession({ code });
+        const { error } = await supabase.auth.exchangeCodeForSession(code); // <-- string arg
         if (!error) {
-          // clean URL (remove ?code=...) and go in
           router.replace('/vault');
           return;
         }
       }
 
-      // 2) Already signed in? go straight in
+      // Fallback (older magic-link deep link): ?token_hash=...&type=magiclink
+      const token_hash = q.get('token_hash');
+      const type = q.get('type');
+      if (token_hash && type === 'magiclink') {
+        const storedEmail = localStorage.getItem('lastSignInEmail') || '';
+        if (storedEmail) {
+          const { error } = await supabase.auth.verifyOtp({
+            token_hash,
+            type: 'magiclink',
+            email: storedEmail
+          });
+          if (!error) {
+            router.replace('/vault');
+            return;
+          }
+        }
+      }
+
+      // Already signed in?
       const { data: { session } } = await supabase.auth.getSession();
       if (session) {
         router.replace('/vault');
         return;
       }
 
-      // 3) Otherwise, show the form
       setLoading(false);
     })();
   }, [q, router]);
 
   const sendMagicLink = async (e: FormEvent) => {
     e.preventDefault();
+    // save email for token_hash fallback
+    localStorage.setItem('lastSignInEmail', email.toLowerCase());
     const { error } = await supabase.auth.signInWithOtp({
       email,
       options: {
-        // make the email link come back to this page (or '/vault' if you prefer)
         emailRedirectTo: `${window.location.origin}/auth/login`,
       },
     });
@@ -52,9 +68,7 @@ export default function LoginPage() {
     else alert('Check your email for the magic link.');
   };
 
-  if (loading) {
-    return <main className="p-6">Signing you in…</main>;
-  }
+  if (loading) return <main className="p-6">Signing you in…</main>;
 
   return (
     <main className="max-w-sm mx-auto p-6 space-y-4">
