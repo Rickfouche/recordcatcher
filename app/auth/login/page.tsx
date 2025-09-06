@@ -1,5 +1,10 @@
 'use client';
 
+// Netlify/Next build: don't pre-render this page
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+export const fetchCache = 'force-no-store';
+
 import { useEffect, useState, FormEvent } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
@@ -20,14 +25,14 @@ export default function LoginPage() {
       // Newer flow: ?code=...
       const code = q.get('code');
       if (code) {
-        const { error } = await supabase.auth.exchangeCodeForSession(code); // string arg
+        const { error } = await supabase.auth.exchangeCodeForSession(code); // <-- string
         if (!error && !cancelled) {
           router.replace('/vault');
           return;
         }
       }
 
-      // Fallback: ?token_hash=...&type=magiclink
+      // Fallback (older deep-link): ?token_hash=...&type=magiclink
       const token_hash = q.get('token_hash');
       const type = q.get('type');
       if (token_hash && type === 'magiclink') {
