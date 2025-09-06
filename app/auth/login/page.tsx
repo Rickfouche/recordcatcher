@@ -11,21 +11,23 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let cancelled = false;
+
     (async () => {
-      const errorDescription = q.get('error_description');
-      if (errorDescription) alert(errorDescription);
+      const errDesc = q.get('error_description');
+      if (errDesc) alert(errDesc);
 
       // Newer flow: ?code=...
       const code = q.get('code');
       if (code) {
-        const { error } = await supabase.auth.exchangeCodeForSession(code); // <-- string arg
-        if (!error) {
+        const { error } = await supabase.auth.exchangeCodeForSession(code); // string arg
+        if (!error && !cancelled) {
           router.replace('/vault');
           return;
         }
       }
 
-      // Fallback (older magic-link deep link): ?token_hash=...&type=magiclink
+      // Fallback: ?token_hash=...&type=magiclink
       const token_hash = q.get('token_hash');
       const type = q.get('type');
       if (token_hash && type === 'magiclink') {
@@ -34,9 +36,9 @@ export default function LoginPage() {
           const { error } = await supabase.auth.verifyOtp({
             token_hash,
             type: 'magiclink',
-            email: storedEmail
+            email: storedEmail,
           });
-          if (!error) {
+          if (!error && !cancelled) {
             router.replace('/vault');
             return;
           }
@@ -45,25 +47,28 @@ export default function LoginPage() {
 
       // Already signed in?
       const { data: { session } } = await supabase.auth.getSession();
-      if (session) {
+      if (session && !cancelled) {
         router.replace('/vault');
         return;
       }
 
-      setLoading(false);
+      if (!cancelled) setLoading(false);
     })();
+
+    return () => { cancelled = true; };
   }, [q, router]);
 
   const sendMagicLink = async (e: FormEvent) => {
     e.preventDefault();
-    // save email for token_hash fallback
     localStorage.setItem('lastSignInEmail', email.toLowerCase());
+
     const { error } = await supabase.auth.signInWithOtp({
       email,
       options: {
         emailRedirectTo: `${window.location.origin}/auth/login`,
       },
     });
+
     if (error) alert(error.message);
     else alert('Check your email for the magic link.');
   };
