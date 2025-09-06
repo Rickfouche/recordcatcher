@@ -39,36 +39,36 @@ export default function Vault() {
 
   if (!session) {
     return (
-      <main className='p-6'>
-        <a className='underline' href='/login'>Sign in to view your Vault</a>
+      <main className="p-6">
+        <a className="underline" href="/login">Sign in to view your Vault</a>
       </main>
     );
   }
 
   return (
-    <main className='max-w-2xl mx-auto p-6 space-y-4'>
-      <header className='flex items-center justify-between'>
-        <h1 className='text-2xl font-bold'>Your Vault</h1>
-        <button className='text-sm underline' onClick={() => supabase.auth.signOut()}>
+    <main className="max-w-2xl mx-auto p-6 space-y-4">
+      <header className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold">Your Vault</h1>
+        <button className="text-sm underline" onClick={() => supabase.auth.signOut()}>
           Logout
         </button>
       </header>
 
       {items.length === 0 && (
-        <p>No catches yet. Go to <a className='underline' href='/catch'>/catch</a> to get one.</p>
+        <p>No catches yet. Go to <a className="underline" href="/catch">/catch</a> to get one.</p>
       )}
 
-      <ul className='space-y-4'>
+      <ul className="space-y-4">
         {items.map((i) => (
-          <li key={i.catch_id} className='border rounded p-3 flex gap-3'>
+          <li key={i.catch_id} className="border rounded p-3 flex gap-3">
             {i.cover_url && (
-              <img src={i.cover_url} alt={i.title} className='w-16 h-16 object-cover rounded' />
+              <img src={i.cover_url} alt={i.title} className="w-16 h-16 object-cover rounded" />
             )}
-            <div className='flex-1'>
-              <div className='font-semibold'>{i.title}</div>
-              <div className='text-sm opacity-70'>{i.artist ?? ''}</div>
-              <audio controls src={i.audio_url} className='w-full mt-2' />
-              <div className='text-xs opacity-60 mt-1'>
+            <div className="flex-1">
+              <div className="font-semibold">{i.title}</div>
+              <div className="text-sm opacity-70">{i.artist ?? ''}</div>
+              <audio controls src={i.audio_url} className="w-full mt-2" />
+              <div className="text-xs opacity-60 mt-1">
                 Caught {new Date(i.caught_at).toLocaleString()}
               </div>
             </div>

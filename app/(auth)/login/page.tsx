@@ -16,15 +16,15 @@ export default function Login() {
   };
 
   return (
-    <main className='max-w-sm mx-auto p-6 space-y-4'>
-      <h1 className='text-2xl font-bold'>Sign in</h1>
+    <main className="max-w-sm mx-auto p-6 space-y-4">
+      <h1 className="text-2xl font-bold">Sign in</h1>
       <input
-        className='w-full border p-2 rounded'
-        placeholder='you@mail.com'
+        className="w-full border p-2 rounded"
+        placeholder="you@mail.com"
         value={email}
         onChange={(e) => setEmail(e.target.value)}
       />
-      <button className='w-full bg-black text-white p-2 rounded' onClick={send}>
+      <button className="w-full bg-black text-white p-2 rounded" onClick={send}>
         Send Magic Link
       </button>
       {sent && <p>Check your email.</p>}
