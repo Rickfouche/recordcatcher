@@ -1,62 +1,77 @@
-// app/auth/login/page.tsx
-'use client'
-import { useState } from 'react'
-import { supabase } from '../../../lib/supabase'
+'use client';
 
-export default function Login() {
-  const [email, setEmail] = useState('')
-  const [sent, setSent] = useState(false)
-  const [loading, setLoading] = useState(false)
-  const [errorMsg, setErrorMsg] = useState<string | null>(null)
+import { useEffect, useState, FormEvent } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { supabase } from '@/lib/supabaseClient';
 
-  const isValid = /\S+@\S+\.\S+/.test(email)
+export default function LoginPage() {
+  const router = useRouter();
+  const q = useSearchParams();
+  const [email, setEmail] = useState('');
+  const [loading, setLoading] = useState(true); // block UI while we try to finish login
 
-  const send = async () => {
-    if (!isValid || loading) return
-    setLoading(true)
-    setErrorMsg(null)
-    try {
-      const { error } = await supabase.auth.signInWithOtp({
-        email,
-        options: {
-          emailRedirectTo: `${window.location.origin}/vault`,
-          shouldCreateUser: true,
-        },
-      })
-      if (error) setErrorMsg(error.message)
-      else setSent(true)
-    } catch (e: any) {
-      setErrorMsg(e?.message ?? 'Something went wrong')
-    } finally {
-      setLoading(false)
-    }
+  useEffect(() => {
+    (async () => {
+      // 1) If we were redirected from the magic link, finish the exchange.
+      const code = q.get('code');
+      const errorDescription = q.get('error_description');
+      if (errorDescription) {
+        alert(errorDescription);
+      }
+      if (code) {
+        const { error } = await supabase.auth.exchangeCodeForSession({ code });
+        if (!error) {
+          // clean URL (remove ?code=...) and go in
+          router.replace('/vault');
+          return;
+        }
+      }
+
+      // 2) Already signed in? go straight in
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session) {
+        router.replace('/vault');
+        return;
+      }
+
+      // 3) Otherwise, show the form
+      setLoading(false);
+    })();
+  }, [q, router]);
+
+  const sendMagicLink = async (e: FormEvent) => {
+    e.preventDefault();
+    const { error } = await supabase.auth.signInWithOtp({
+      email,
+      options: {
+        // make the email link come back to this page (or '/vault' if you prefer)
+        emailRedirectTo: `${window.location.origin}/auth/login`,
+      },
+    });
+    if (error) alert(error.message);
+    else alert('Check your email for the magic link.');
+  };
+
+  if (loading) {
+    return <main className="p-6">Signing you in…</main>;
   }
 
   return (
     <main className="max-w-sm mx-auto p-6 space-y-4">
       <h1 className="text-2xl font-bold">Sign in</h1>
-
-      <input
-        className="w-full border p-2 rounded"
-        placeholder="you@mail.com"
-        type="email"
-        inputMode="email"
-        autoComplete="email"
-        value={email}
-        onChange={(e) => setEmail(e.target.value)}
-        onKeyDown={(e) => { if (e.key === 'Enter') send() }}
-      />
-
-      <button
-        className="w-full bg-black text-white p-2 rounded disabled:opacity-50"
-        onClick={send}
-        disabled={!isValid || loading}
-      >
-        {loading ? 'Sending…' : 'Send magic link'}
-      </button>
-
-      {errorMsg && <p className="text-sm text-red-600">{errorMsg}</p>}
-      {sent && <p>Check your email and click the link.</p>}
+      <form onSubmit={sendMagicLink} className="space-y-3">
+        <input
+          type="email"
+          required
+          placeholder="you@email.com"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          className="w-full border rounded px-3 py-2"
+        />
+        <button className="w-full bg-black text-white rounded px-3 py-2">
+          Send magic link
+        </button>
+      </form>
     </main>
-  )
+  );
 }
