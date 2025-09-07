@@ -1,22 +1,22 @@
 'use client';
 
-// Tell Next.js not to prerender this page at build time
+// Make this route dynamic (no prerender at build)
 export const dynamic = 'force-dynamic';
-export const revalidate = 0;
+// ⛔ Remove any `export const revalidate = ...` lines
 
 import { useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 
 export default function AuthCallback() {
+  // Don’t run in SSR/prerender
+  if (typeof window === 'undefined') return null;
+
   const router = useRouter();
   const q = useSearchParams();
 
   useEffect(() => {
-    // Only run this in the browser
-    if (typeof window === 'undefined') return;
-
     (async () => {
-      // Lazy import avoids SSR/localStorage issues at build time
+      // Lazy import avoids SSR/localStorage issues during build
       const { supabase } = await import('@/lib/supabaseClient');
 
       const code = q.get('code');
@@ -28,8 +28,6 @@ export default function AuthCallback() {
         alert(error.message);
         return;
       }
-
-      // Redirect once the session is exchanged
       router.replace('/vault');
     })();
   }, [q, router]);
