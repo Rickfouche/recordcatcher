@@ -2,44 +2,34 @@
 
 import { useEffect, useState } from 'react';
 
-export default function ARPageClient() {
+type Track = { id: string; title: string; lat: number; lng: number };
+
+export default function ARPageClient({ initialTracks }: { initialTracks: Track[] }) {
+  const [tracks, setTracks] = useState<Track[]>(initialTracks);
   const [ready, setReady] = useState(false);
-  const [msg, setMsg] = useState('Booting…');
-  const [clicks, setClicks] = useState(0);
 
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        // TODO: init AR / browser-only setup here
-        if (!cancelled) {
-          setMsg('Client ready.');
-          setReady(true);
-        }
-      } catch (e) {
-        console.error(e);
-        if (!cancelled) setMsg('Init failed. Check console.');
-      }
-    })();
-    return () => { cancelled = true; };
+    setReady(true);
   }, []);
 
   return (
     <main className="p-6 space-y-4">
       <h1 className="text-2xl font-semibold">AR Page (Client)</h1>
-      <p>{msg}</p>
+      <div>Status: {ready ? '✅ Client ready' : '⏳'}</div>
 
-      <button
-        className="rounded-2xl px-4 py-2 shadow border"
-        onClick={() => setClicks(c => c + 1)}
-      >
-        Test interactivity
-      </button>
-      <div>Clicks: {clicks}</div>
-      <div>Status: {ready ? '✅ Ready' : '⏳ Waiting'}</div>
-
-      {/* Drop AR canvas/iframe/component here */}
-      {/* <iframe src="/ar/viewer.html" className="w-full h-[60vh]" /> */}
+      <section className="space-y-2">
+        <h2 className="text-lg font-medium">Nearby tracks</h2>
+        <ul className="list-disc pl-6">
+          {tracks.map((t) => (
+            <li key={t.id}>
+              <span className="font-medium">{t.title}</span>{' '}
+              <span className="opacity-70">
+                ({t.lat.toFixed(3)}, {t.lng.toFixed(3)})
+              </span>
+            </li>
+          ))}
+        </ul>
+      </section>
     </main>
   );
 }
