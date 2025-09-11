@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Flux.001 — Mirrorborn AR - Fighting Onyx Black</title>
+
+    <script src="https://aframe.io/releases/1.6.0/aframe.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/donmccurdy/aframe-extras@6.1.1/dist/aframe-extras.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-aframe.prod.js"></script>
+
+    <style>
+      body { margin: 0; overflow: hidden; background:#fff; }
+      .ar-scene-container { width: 100vw; height: 100vh; position: relative; }
+      #tap-catcher { position: fixed; inset: 0; z-index: 999; display: none; }
+      #loader {
+        position: fixed; inset: 0; background: white;
+        display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 9999;
+        transition: opacity 0.5s ease;
+      }
+      #nd-logo {
+        width: 220px; opacity: 0;
+        animation: fadeInLogo 1s ease-out forwards, glow 3s ease-in-out 1.2s infinite, float 4s ease-in-out 1.2s infinite;
+      }
+      .powered-by {
+        color: black; font-size: 15px; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+        opacity: 0; margin-top: 12px; animation: fadeInText 1s ease-out forwards; animation-delay: 1.2s;
+      }
+      @keyframes fadeInLogo { to { opacity: 1; } }
+      @keyframes fadeInText { to { opacity: 1; } }
+      @keyframes glow { 0%,100% { filter: drop-shadow(0 0 8px rgba(0,255,255,.25)); } 50% { filter: drop-shadow(0 0 12px rgba(0,255,255,.6)); } }
+      @keyframes float { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
+    </style>
+  </head>
+
+  <body>
+    <!-- Loader -->
+    <div id="loader">
+      <img src="https://scanpacks.b-cdn.net/MonaLisa/ndelogo.png" alt="Neon Doorway Logo" id="nd-logo" />
+      <p class="powered-by">Powered by Neon Doorway</p>
+    </div>
+
+    <div class="ar-scene-container">
+      <a-scene
+        id="scene"
+        mindar-image="imageTargetSrc: https://scanpacks.b-cdn.net/Walking%20Flux%20Main/NDCard.mind; uiScanning: false;"
+        color-space="sRGB"
+        embedded
+        renderer="colorManagement: true; physicallyCorrectLights: true; toneMapping: ACESFilmic"
+        vr-mode-ui="enabled: false"
+        device-orientation-permission-ui="enabled: true"
+        style="visibility: hidden;"
+      >
+        <a-assets>
+          <a-asset-item id="fluxModel" src="https://scanpacks.b-cdn.net/Walking%20Flux%20Main/Flux.glb"></a-asset-item>
+          <a-asset-item id="fluxPlaceholder" src="https://scanpacks.b-cdn.net/Walking%20Flux%20Main/Flux.glb"></a-asset-item>
+          <img id="businessCardImage" src="https://scanpacks.b-cdn.net/Walking%20Flux%20Main/Business%20Card4.png" />
+        </a-assets>
+
+        <!-- Lights (normalized; previous values could wash scene to white) -->
+        <a-entity light="type: ambient; color: #ffffff; intensity: 0.6"></a-entity>
+        <a-entity light="type: directional; color: #ffffff; intensity: 0.9" position="1 2 1"></a-entity>
+        <a-entity light="type: directional; color: #aaccff; intensity: 0.4" position="-2 2 -1"></a-entity>
+
+        <!-- Camera -->
+        <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
+
+        <!-- Target group -->
+        <a-entity mindar-image-target="targetIndex: 0">
+          <a-plane
+            src="#businessCardImage"
+            position="0 0 0"
+            height="0.552"
+            width="1"
+            rotation="0 0 90"
+            material="shader: flat; transparent: true; opacity: 1; emissive: #00ffff; emissiveIntensity: 0.1"
+          ></a-plane>
+
+          <a-entity
+            id="flux"
+            gltf-model="#fluxPlaceholder"
+            position="0 0 0"
+            scale="0.5 0.5 0.5"
+            shadow="cast: true; receive: false"
+          ></a-entity>
+        </a-entity>
+      </a-scene>
+    </div>
+
+    <div id="tap-catcher"></div>
+
+    <script>
+      (function () {
+        const sceneEl = document.getElementById("scene");
+        const loader  = document.getElementById("loader");
+        const target  = document.querySelector("[mindar-image-target]");
+        const fluxEl  = document.getElementById("flux");
+        const tapCatcher = document.getElementById("tap-catcher");
+
+        let modelSwapped = false;
+        let revealed = false;
+
+        // Warm the .mind file (ignore CORS errors)
+        fetch("https://scanpacks.b-cdn.net/Walking%20Flux%20Main/NDCard.mind").catch(()=>{});
+
+        function reveal() {
+          if (revealed) return;
+          revealed = true;
+          loader.style.opacity = "0";
+          setTimeout(() => {
+            loader.style.display = "none";
+            sceneEl.style.visibility = "visible";
+          }, 500);
+        }
+
+        // Normal success path
+        sceneEl.addEventListener("arReady", reveal);
+
+        // If init fails (permissions/device), still reveal with a hint
+        sceneEl.addEventListener("arError", (e) => {
+          console.warn("MindAR arError:", e);
+          reveal();
+        });
+
+        // Fallback: reveal anyway after 3.5s
+        setTimeout(reveal, 3500);
+
+        target.addEventListener("targetFound", () => {
+          tapCatcher.style.display = "block";
+          if (!modelSwapped) {
+            fluxEl.setAttribute("gltf-model", "#fluxModel");
+            fluxEl.setAttribute("animation-mixer", "clip: *; loop: repeat; timeScale: 1");
+            modelSwapped = true;
+          }
+        });
+
+        target.addEventListener("targetLost", () => {
+          tapCatcher.style.display = "none";
+        });
+
+        tapCatcher.addEventListener("click", () => {
+          window.location.href = "https://www.neondoorway.com/scanpacks";
+        });
+      })();
+    </script>
+  </body>
+</html>
