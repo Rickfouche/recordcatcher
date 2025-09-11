@@ -27,9 +27,6 @@
       backdrop-filter: blur(6px);
     }
     #arrow svg { width:34px; height:34px; transform-origin:50% 50%; }
-
-    /* Kill AR.js blue loader overlay */
-    .arjs-loader { display: none !important; }
   </style>
 </head>
 <body>
@@ -48,23 +45,25 @@
     renderer="antialias: true; alpha: true"
     arjs="sourceType: webcam; videoTexture: true; debugUIEnabled: false;"
   >
-    <!-- Real GPS (no simulation). We’ll set attributes dynamically. -->
     <a-camera id="cam" gps-camera rotation-reader></a-camera>
 
-    <!-- Flux is always visible 3m ahead (fallback), and we also anchor to GPS target -->
     <a-entity id="flux"
       gltf-model="https://scanpacks.b-cdn.net/Walking%20Flux%20Main/Flux.glb"
       scale="0.5 0.5 0.5"
       position="0 0 -3"
       look-at="[gps-camera]"
       visible="true"
-      cursor="rayOrigin: mouse"
-      raycaster="objects: #flux"
     ></a-entity>
   </a-scene>
 
   <script>
-    // URL params: ?title=...&lat=...&lng=...&link=...
+    // Remove AR.js loader overlay completely
+    window.addEventListener('load', () => {
+      const loader = document.querySelector('.arjs-loader');
+      if (loader) loader.remove();
+    });
+
+    // URL params
     const q = new URLSearchParams(location.search);
     const title = q.get('title') || 'Flux';
     const targetLat = parseFloat(q.get('lat') || '');
@@ -75,27 +74,26 @@
     const statusEl = document.getElementById('status');
     const startBtn = document.getElementById('start');
     const arrowSVG = document.querySelector('#arrow svg');
-    const camEl    = document.getElementById('cam');
     const fluxEl   = document.getElementById('flux');
 
     titleEl.textContent = `${title} — Geo AR (Hunt Mode)`;
 
     // Utils
-    const toRad = v => v * Math.PI / 180;
-    const toDeg = v => v * 180 / Math.PI;
+    const toRad = v => v * Math.PI/180;
+    const toDeg = v => v * 180/Math.PI;
     function haversine(lat1, lon1, lat2, lon2){
       const R=6371, dLat=toRad(lat2-lat1), dLon=toRad(lon2-lon1);
       const a=Math.sin(dLat/2)**2 + Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLon/2)**2;
-      return 2*R*Math.asin(Math.sqrt(a)); // km
+      return 2*R*Math.asin(Math.sqrt(a));
     }
     function bearing(lat1, lon1, lat2, lon2){
       const y = Math.sin(toRad(lon2-lon1)) * Math.cos(toRad(lat2));
       const x = Math.cos(toRad(lat1))*Math.sin(toRad(lat2)) -
                 Math.sin(toRad(lat1))*Math.cos(toRad(lat2))*Math.cos(toRad(lon2-lon1));
-      return (toDeg(Math.atan2(y,x)) + 360) % 360; // 0..360° from north
+      return (toDeg(Math.atan2(y,x)) + 360) % 360;
     }
 
-    // iOS motion/compass permission
+    // Motion/compass permission
     async function requestMotion(){
       try{
         if (typeof DeviceMotionEvent!=='undefined' &&
@@ -109,13 +107,13 @@
       }catch(_){}
     }
 
-    // Track device heading (for arrow)
+    // Track heading
     let deviceHeading = null;
     window.addEventListener('deviceorientationabsolute', (e)=>{
       if (e.absolute && typeof e.alpha === 'number') deviceHeading = (360 - e.alpha) % 360;
     }, true);
     window.addEventListener('deviceorientation', (e)=>{
-      if (typeof e.webkitCompassHeading === 'number') deviceHeading = e.webkitCompassHeading; // iOS
+      if (typeof e.webkitCompassHeading === 'number') deviceHeading = e.webkitCompassHeading;
     }, true);
 
     startBtn.addEventListener('click', async ()=>{
@@ -125,8 +123,6 @@
 
       if (!navigator.geolocation){
         statusEl.textContent = 'Geolocation not supported.';
-        startBtn.textContent = 'Start AR';
-        startBtn.disabled = false;
         return;
       }
 
@@ -135,11 +131,11 @@
         fixes++;
         const { latitude, longitude, accuracy } = pos.coords;
 
-        // Hide AR.js loader overlay if still present
-        const l = document.querySelector('.arjs-loader');
-        if (l) l.style.display = 'none';
+        // Remove loader if still present
+        const loader = document.querySelector('.arjs-loader');
+        if (loader) loader.remove();
 
-        // Anchor Flux to the GPS target (even if far away)
+        // Anchor Flux at target
         if (Number.isFinite(targetLat) && Number.isFinite(targetLng)) {
           fluxEl.setAttribute('gps-entity-place', `latitude: ${targetLat}; longitude: ${targetLng};`);
         }
@@ -150,19 +146,16 @@
           const dKm = haversine(latitude, longitude, targetLat, targetLng);
           line += dKm < 0.01 ? `\nDistance: ${(dKm*1000).toFixed(0)} m`
                              : `\nDistance: ${dKm.toFixed(2)} km`;
-        } else {
-          line += `\nNo target set (?lat=&lng=)`;
         }
         statusEl.textContent = line;
 
-        // Rotate HUD arrow toward the target
+        // Arrow rotation
         if (deviceHeading!=null && Number.isFinite(targetLat) && Number.isFinite(targetLng)){
           const brg = bearing(latitude, longitude, targetLat, targetLng);
-          const turn = (brg - deviceHeading + 360) % 360; // how much to turn
+          const turn = (brg - deviceHeading + 360) % 360;
           arrowSVG.style.transform = `rotate(${turn}deg)`;
         }
 
-        // We’re live — hide the start button
         startBtn.style.display = 'none';
       }, (err)=>{
         statusEl.textContent = `Location error: ${err.message}`;
@@ -171,7 +164,6 @@
       }, { enableHighAccuracy:true, timeout:10000, maximumAge:0 });
     });
 
-    // Tap opens link (song/IG/etc)
     if (link){
       fluxEl.addEventListener('click', ()=>{ window.location.href = link; });
     }
