@@ -2,9 +2,9 @@
 <html lang="en">
 <head>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>Flux — Geo AR (Real GPS)</title>
+  <title>Flux — Geo AR (Hunt Mode)</title>
 
-  <!-- A-Frame + AR.js (location-based) -->
+  <!-- A-Frame + AR.js -->
   <script src="https://aframe.io/releases/1.6.0/aframe.min.js"></script>
   <script src="https://cdn.jsdelivr.net/gh/AR-js-org/AR.js@3.4.2/aframe/build/aframe-ar.js"></script>
 
@@ -12,9 +12,8 @@
     html, body { margin:0; height:100%; background:#000; }
     #hud {
       position:fixed; left:0; right:0; top:0; padding:8px 12px;
-      color:#fff; font:14px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
-      background:linear-gradient(180deg, rgba(0,0,0,.7), rgba(0,0,0,0)); z-index:10;
-      white-space:pre-wrap;
+      color:#fff; font:14px/1.35 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+      background:linear-gradient(180deg, rgba(0,0,0,.7), rgba(0,0,0,0)); z-index:10; white-space:pre-wrap;
     }
     #status { opacity:.95 }
     #start {
@@ -22,37 +21,42 @@
       padding:10px 14px; border:0; border-radius:10px;
       background:#0a84ff; color:#fff; font:600 14px system-ui;
     }
-    #error {
-      position:fixed; left:12px; right:12px; bottom:12px; z-index:12;
-      padding:10px 12px; border-radius:10px; background:#ff3b30; color:#fff; display:none;
-      font:600 14px system-ui;
+    #arrow {
+      position:fixed; right:12px; bottom:12px; width:56px; height:56px; z-index:11;
+      border-radius:50%; background:rgba(0,0,0,.55); display:flex; align-items:center; justify-content:center;
+      backdrop-filter: blur(6px);
     }
+    #arrow svg { width:34px; height:34px; transform-origin:50% 50%; }
   </style>
 </head>
 <body>
   <div id="hud">
-    <div id="title">Flux — Geo AR (Real GPS)</div>
+    <div id="title">Flux — Geo AR (Hunt Mode)</div>
     <div id="status">Tap “Start AR” and allow Camera + Precise Location.</div>
   </div>
   <button id="start">Start AR</button>
-  <div id="error"></div>
+  <div id="arrow" title="Turn until arrow points up">
+    <!-- simple arrow icon -->
+    <svg viewBox="0 0 24 24" fill="#fff"><path d="M12 2l4.5 8h-9L12 2zm0 5a1 1 0 110 2 1 1 0 010-2zM10 22v-8h4v8h-4z"/></svg>
+  </div>
 
-  <!-- Location-based AR scene -->
+  <!-- Scene -->
   <a-scene
     vr-mode-ui="enabled: false"
     embedded
     renderer="antialias: true; alpha: true"
     arjs="sourceType: webcam; videoTexture: true; debugUIEnabled: false;"
   >
-    <!-- Camera with GPS (no simulation; we’ll feed real fixes) -->
+    <!-- Real GPS (no simulation) -->
     <a-camera id="cam" gps-camera rotation-reader></a-camera>
 
-    <!-- Flux model (becomes visible after first real fix) -->
+    <!-- Flux (always visible; anchored to GPS when we have coords) -->
     <a-entity id="flux"
       gltf-model="https://scanpacks.b-cdn.net/Walking%20Flux%20Main/Flux.glb"
-      scale="0.45 0.45 0.45"
+      scale="0.5 0.5 0.5"     <!-- tweak to match your surface size -->
+      position="0 0 -5"       <!-- fallback: 5m ahead so you can always see him -->
       look-at="[gps-camera]"
-      visible="false"
+      visible="true"
       cursor="rayOrigin: mouse"
       raycaster="objects: #flux"
     ></a-entity>
@@ -66,121 +70,97 @@
     const targetLng = parseFloat(q.get('lng') || '');
     const link = q.get('link') || '';
 
-    const titleEl = document.getElementById('title');
+    const titleEl  = document.getElementById('title');
     const statusEl = document.getElementById('status');
-    const errorEl  = document.getElementById('error');
     const startBtn = document.getElementById('start');
-    const fluxEl   = document.getElementById('flux');
+    const arrowEl  = document.querySelector('#arrow svg');
     const camEl    = document.getElementById('cam');
+    const fluxEl   = document.getElementById('flux');
 
-    titleEl.textContent = `${title} — Geo AR (Real GPS)`;
+    titleEl.textContent = `${title} — Geo AR (Hunt Mode)`;
 
-    function haversine(lat1, lon1, lat2, lon2) {
-      const toRad = v => v * Math.PI/180;
-      const R = 6371; // km
-      const dLat = toRad(lat2-lat1), dLon = toRad(lon2-lon1);
-      const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLon/2)**2;
+    function toRad(v){return v*Math.PI/180}
+    function toDeg(v){return v*180/Math.PI}
+    function haversine(lat1, lon1, lat2, lon2){
+      const R=6371, dLat=toRad(lat2-lat1), dLon=toRad(lon2-lon1);
+      const a=Math.sin(dLat/2)**2+Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLon/2)**2;
       return 2*R*Math.asin(Math.sqrt(a)); // km
     }
+    function bearing(lat1, lon1, lat2, lon2){
+      const y = Math.sin(toRad(lon2-lon1))*Math.cos(toRad(lat2));
+      const x = Math.cos(toRad(lat1))*Math.sin(toRad(lat2)) - Math.sin(toRad(lat1))*Math.cos(toRad(lat2))*Math.cos(toRad(lon2-lon1));
+      return (toDeg(Math.atan2(y,x)) + 360) % 360; // degrees from north
+    }
 
-    // iOS motion/compass permission
-    async function requestMotion() {
-      try {
-        if (typeof DeviceMotionEvent !== 'undefined' &&
-            typeof DeviceMotionEvent.requestPermission === 'function') {
+    // iOS motion permission (for compass/heading)
+    async function requestMotion(){
+      try{
+        if (typeof DeviceMotionEvent!=='undefined' && typeof DeviceMotionEvent.requestPermission==='function') {
           await DeviceMotionEvent.requestPermission();
         }
-        if (typeof DeviceOrientationEvent !== 'undefined' &&
-            typeof DeviceOrientationEvent.requestPermission === 'function') {
+        if (typeof DeviceOrientationEvent!=='undefined' && typeof DeviceOrientationEvent.requestPermission==='function') {
           await DeviceOrientationEvent.requestPermission();
         }
-      } catch (_) { /* ignore */ }
+      }catch(_){}
     }
 
-    // Show a clear failure if we never get a fix
-    let fixTimer = null;
-    function armFixTimeout() {
-      clearTimeout(fixTimer);
-      fixTimer = setTimeout(() => {
-        errorEl.style.display = 'block';
-        errorEl.textContent = 'No GPS fix. Move to open sky and ensure Precise Location is ON for this site.';
-      }, 12000);
-    }
+    // Track device heading if available
+    let deviceHeading = null;
+    window.addEventListener('deviceorientationabsolute', (e)=>{
+      if (e.absolute && typeof e.alpha === 'number') deviceHeading = (360 - e.alpha) % 360;
+    }, true);
+    window.addEventListener('deviceorientation', (e)=>{
+      if (typeof e.webkitCompassHeading === 'number') deviceHeading = e.webkitCompassHeading; // iOS
+    }, true);
 
-    // Start flow: user gesture triggers permissions + real GPS
-    startBtn.addEventListener('click', async () => {
+    startBtn.addEventListener('click', async ()=>{
       startBtn.disabled = true;
       startBtn.textContent = 'Starting…';
-      errorEl.style.display = 'none';
-      errorEl.textContent = '';
-      statusEl.textContent = 'Requesting motion + location…';
-
       await requestMotion();
 
-      if (!navigator.geolocation) {
-        errorEl.style.display = 'block';
-        errorEl.textContent = 'Geolocation not supported in this browser.';
+      if (!navigator.geolocation){
+        statusEl.textContent = 'Geolocation not supported.';
         startBtn.textContent = 'Start AR';
         startBtn.disabled = false;
         return;
       }
 
-      armFixTimeout();
+      let fixes=0;
+      navigator.geolocation.watchPosition((pos)=>{
+        fixes++;
+        const { latitude, longitude, accuracy } = pos.coords;
+        let line = `Fixes: ${fixes}  Acc: ${Math.round(accuracy||0)} m\nLat: ${latitude.toFixed(5)}  Lng: ${longitude.toFixed(5)}`;
 
-      let fixes = 0;
-      const watchId = navigator.geolocation.watchPosition(
-        (pos) => {
-          fixes++;
-          clearTimeout(fixTimer); // got a fix, cancel failure timer
+        if (Number.isFinite(targetLat) && Number.isFinite(targetLng)){
+          const dKm = haversine(latitude, longitude, targetLat, targetLng);
+          line += dKm<0.01 ? `\nDistance: ${(dKm*1000).toFixed(0)} m` : `\nDistance: ${dKm.toFixed(2)} km`;
 
-          const { latitude, longitude, accuracy } = pos.coords;
-          const acc = Math.round(accuracy || 0);
+          // Anchor Flux to the GPS target (even if far away)
+          fluxEl.setAttribute('gps-entity-place', `latitude: ${targetLat}; longitude: ${targetLng};`);
+        } else {
+          line += `\nNo target set (?lat=&lng=)`;
+        }
+        statusEl.textContent = line;
 
-          // Feed the real fix to AR.js camera (as "simulate" with REAL data)
-          // This clears AR.js's blue loading state immediately but remains legit.
-          const existing = camEl.getAttribute('gps-camera') || '';
-          camEl.setAttribute('gps-camera',
-            `${existing ? existing + '; ' : ''}simulateLatitude: ${latitude}; simulateLongitude: ${longitude}; minDistance: 1; timeInterval: 1000`
-          );
+        // Rotate HUD arrow toward the target
+        if (deviceHeading!=null && Number.isFinite(targetLat) && Number.isFinite(targetLng)){
+          const brg = bearing(latitude, longitude, targetLat, targetLng); // where we should face
+          const turn = (brg - deviceHeading + 360) % 360;                // how much to turn
+          arrowEl.style.transform = `rotate(${turn}deg)`;
+        }
 
-          // Place Flux at target if provided
-          if (Number.isFinite(targetLat) && Number.isFinite(targetLng)) {
-            fluxEl.setAttribute('gps-entity-place', `latitude: ${targetLat}; longitude: ${targetLng};`);
-          }
-          // Reveal Flux after first real fix
-          if (!fluxEl.getAttribute('visible')) {
-            fluxEl.setAttribute('visible', true);
-          }
-
-          // HUD update
-          let line = `Fixes: ${fixes}  Acc: ${acc} m\nLat: ${latitude.toFixed(5)}  Lng: ${longitude.toFixed(5)}`;
-          if (Number.isFinite(targetLat) && Number.isFinite(targetLng)) {
-            const dKm = haversine(latitude, longitude, targetLat, targetLng);
-            line += dKm < 0.01 ? `\nDistance: ${(dKm*1000).toFixed(0)} m` : `\nDistance: ${dKm.toFixed(2)} km`;
-          } else {
-            line += `\nNo target set (?lat=&lng=)`;
-          }
-          statusEl.textContent = line;
-
-          // Hide Start button once running
-          startBtn.style.display = 'none';
-        },
-        (err) => {
-          errorEl.style.display = 'block';
-          errorEl.textContent = `Location error: ${err.message}\nCheck Safari → Location: Allow + Precise Location.`;
-          startBtn.textContent = 'Start AR';
-          startBtn.disabled = false;
-        },
-        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
-      );
-
-      // If user wants to stop later:
-      // navigator.geolocation.clearWatch(watchId);
+        // Hide start when running
+        startBtn.style.display = 'none';
+      }, (err)=>{
+        statusEl.textContent = `Location error: ${err.message}`;
+        startBtn.textContent = 'Start AR';
+        startBtn.disabled = false;
+      }, { enableHighAccuracy:true, timeout:10000, maximumAge:0 });
     });
 
-    // Optional tap → open link (song/IG/etc)
-    if (link) {
-      fluxEl.addEventListener('click', () => { window.location.href = link; });
+    // Tap opens link (song/IG/etc)
+    if (link){
+      fluxEl.addEventListener('click', ()=>{ window.location.href = link; });
     }
   </script>
 </body>
