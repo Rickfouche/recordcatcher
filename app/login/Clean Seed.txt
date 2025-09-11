@@ -1,0 +1,36 @@
+-- 1) Clear catches & unclaim instances (keep tracks/users)
+delete from public.catches;
+
+update public.instances
+set claimed_by = null, claimed_at = null;
+
+-- 2) (Optional) wipe placements to respawn fresh
+delete from public.placements;
+
+-- 3) Reseed 20 instances for each track (fills any missing numbers)
+insert into public.instances (track_id, number)
+select t.id, n
+from public.tracks t
+cross join generate_series(1,20) n
+left join public.instances i
+  on i.track_id = t.id and i.number = n
+where i.id is null;
+
+-- 4) Seed 5 placements near E 81st & York for the first track
+with center as (
+  select 40.77295::double precision as lat, -73.9496::double precision as lon
+)
+insert into public.placements (track_id, lat, lon, radius_m)
+select t.id,
+       c.lat + offs.lat_delta,
+       c.lon + offs.lon_delta,
+       200
+from (select id from public.tracks order by created_at asc limit 1) t
+cross join center c
+cross join (values
+  ( 0.00040,  0.00000),
+  (-0.00035,  0.00025),
+  ( 0.00010, -0.00045),
+  ( 0.00055,  0.00040),
+  (-0.00050, -0.00030)
+) as offs(lat_delta, lon_delta);
