@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>Flux — Geo AR</title>
+  <title>Flux — Geo AR (Debug)</title>
 
   <!-- A-Frame + AR.js (location-based) -->
   <script src="https://aframe.io/releases/1.6.0/aframe.min.js"></script>
@@ -14,14 +14,15 @@
       position:fixed; left:0; right:0; top:0; padding:8px 12px;
       color:#fff; font:14px/1.35 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
       background:linear-gradient(180deg, rgba(0,0,0,.7), rgba(0,0,0,0)); z-index:10;
+      white-space:pre-wrap;
     }
-    #status { opacity:.9 }
+    #status { opacity:.95 }
   </style>
 </head>
 <body>
   <div id="hud">
-    <div id="title">Flux — Geo AR</div>
-    <div id="status">Requesting location…</div>
+    <div id="title">Flux — Geo AR (Debug)</div>
+    <div id="status">Requesting camera & precise location…</div>
   </div>
 
   <!-- Location-based AR scene -->
@@ -57,7 +58,7 @@
     const statusEl = document.getElementById('status');
     const fluxEl = document.getElementById('flux');
 
-    titleEl.textContent = `${title} — Geo AR`;
+    titleEl.textContent = `${title} — Geo AR (Debug)`;
 
     function haversine(lat1, lon1, lat2, lon2) {
       const toRad = v => v * Math.PI/180;
@@ -67,22 +68,41 @@
       return 2*R*Math.asin(Math.sqrt(a)); // km
     }
 
+    // Place Flux if target coords exist
     if (Number.isFinite(lat) && Number.isFinite(lng)) {
-      // Place Flux at given GPS coordinates
       fluxEl.setAttribute('gps-entity-place', `latitude: ${lat}; longitude: ${lng};`);
       fluxEl.setAttribute('visible', true);
-      statusEl.textContent = `Target: ${lat.toFixed(5)}, ${lng.toFixed(5)} — walk toward it`;
     } else {
       statusEl.textContent = 'Missing lat/lng in URL params.';
     }
 
-    // Distance HUD as you move
+    // Live GPS debug HUD + distance
     window.addEventListener('gps-camera-update-position', (e) => {
       const pos = e.detail && e.detail.position;
-      if (!pos || !Number.isFinite(lat)) return;
-      const dKm = haversine(pos.latitude, pos.longitude, lat, lng);
-      statusEl.textContent = dKm < 0.01 ? `Distance: ${(dKm*1000).toFixed(0)} m` : `Distance: ${dKm.toFixed(2)} km`;
+      if (!pos) {
+        statusEl.textContent = 'Waiting for GPS… (go outside; enable Precise Location)';
+        return;
+      }
+      let line = `Lat: ${pos.latitude.toFixed(5)}  Lng: ${pos.longitude.toFixed(5)}`;
+      if (Number.isFinite(lat) && Number.isFinite(lng)) {
+        const dKm = haversine(pos.latitude, pos.longitude, lat, lng);
+        line += dKm < 0.01 ? `\nDistance: ${(dKm*1000).toFixed(0)} m` : `\nDistance: ${dKm.toFixed(2)} km`;
+      } else {
+        line += `\nNo target set. Add ?lat=..&lng=.. to URL.`;
+      }
+      statusEl.textContent = line;
     });
+
+    // Prompt for location once up-front (helps iOS show the permission dialog)
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        () => {}, // success: AR.js will handle ongoing updates
+        (err) => {
+          statusEl.textContent = `Location error: ${err.message}\nAllow "Precise Location" for this site.`;
+        },
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+      );
+    }
 
     // Optional tap → open link (song/IG/etc)
     if (link) {
