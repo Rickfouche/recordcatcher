@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Flux — Geo AR</title>
+
+  <!-- A-Frame + AR.js (location-based) -->
+  <script src="https://aframe.io/releases/1.6.0/aframe.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/AR-js-org/AR.js@3.4.2/aframe/build/aframe-ar.js"></script>
+
+  <style>
+    html, body { margin:0; height:100%; background:#000; }
+    #hud {
+      position:fixed; left:0; right:0; top:0; padding:8px 12px;
+      color:#fff; font:14px/1.35 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+      background:linear-gradient(180deg, rgba(0,0,0,.7), rgba(0,0,0,0)); z-index:10;
+    }
+    #status { opacity:.9 }
+  </style>
+</head>
+<body>
+  <div id="hud">
+    <div id="title">Flux — Geo AR</div>
+    <div id="status">Requesting location…</div>
+  </div>
+
+  <!-- Location-based AR scene -->
+  <a-scene
+    vr-mode-ui="enabled: false"
+    embedded
+    renderer="antialias: true; alpha: true"
+    arjs="sourceType: webcam; videoTexture: true; debugUIEnabled: false;"
+  >
+    <!-- Camera with GPS + rotation reader -->
+    <a-camera gps-camera rotation-reader></a-camera>
+
+    <!-- Flux model placed by GPS -->
+    <a-entity id="flux"
+      gltf-model="https://scanpacks.b-cdn.net/Walking%20Flux%20Main/Flux.glb"
+      scale="0.45 0.45 0.45"
+      look-at="[gps-camera]"
+      visible="false"
+      cursor="rayOrigin: mouse"
+      raycaster="objects: #flux"
+    ></a-entity>
+  </a-scene>
+
+  <script>
+    // URL params: ?title=...&lat=...&lng=...&link=...
+    const q = new URLSearchParams(location.search);
+    const title = q.get('title') || 'Flux';
+    const lat = parseFloat(q.get('lat') || '');
+    const lng = parseFloat(q.get('lng') || '');
+    const link = q.get('link') || '';
+
+    const titleEl = document.getElementById('title');
+    const statusEl = document.getElementById('status');
+    const fluxEl = document.getElementById('flux');
+
+    titleEl.textContent = `${title} — Geo AR`;
+
+    function haversine(lat1, lon1, lat2, lon2) {
+      const toRad = v => v * Math.PI/180;
+      const R = 6371; // km
+      const dLat = toRad(lat2-lat1), dLon = toRad(lon2-lon1);
+      const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLon/2)**2;
+      return 2*R*Math.asin(Math.sqrt(a)); // km
+    }
+
+    if (Number.isFinite(lat) && Number.isFinite(lng)) {
+      // Place Flux at given GPS coordinates
+      fluxEl.setAttribute('gps-entity-place', `latitude: ${lat}; longitude: ${lng};`);
+      fluxEl.setAttribute('visible', true);
+      statusEl.textContent = `Target: ${lat.toFixed(5)}, ${lng.toFixed(5)} — walk toward it`;
+    } else {
+      statusEl.textContent = 'Missing lat/lng in URL params.';
+    }
+
+    // Distance HUD as you move
+    window.addEventListener('gps-camera-update-position', (e) => {
+      const pos = e.detail && e.detail.position;
+      if (!pos || !Number.isFinite(lat)) return;
+      const dKm = haversine(pos.latitude, pos.longitude, lat, lng);
+      statusEl.textContent = dKm < 0.01 ? `Distance: ${(dKm*1000).toFixed(0)} m` : `Distance: ${dKm.toFixed(2)} km`;
+    });
+
+    // Optional tap → open link (song/IG/etc)
+    if (link) {
+      fluxEl.addEventListener('click', () => { window.location.href = link; });
+    }
+  </script>
+</body>
+</html>
