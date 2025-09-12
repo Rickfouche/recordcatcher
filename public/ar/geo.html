@@ -5,11 +5,17 @@
   <title>Flux — Geo AR (Hunt Mode)</title>
 
   <!-- A-Frame + AR.js -->
-  <script src="https://aframe.io/releases/1.6.0/aframe.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/gh/AR-js-org/AR.js@3.4.2/aframe/build/aframe-ar.js"></script>
+  <!-- Updated A-Frame and AR.js versions to a stable, compatible combination (1.2.0 and 3.3.3) to fix the errors. -->
+  <script src="https://aframe.io/releases/1.2.0/aframe.min.js"></script>
+  <script src="https://raw.githack.com/AR-js-org/AR.js/3.3.3/aframe/build/aframe-ar.js"></script>
 
   <style>
     html, body { margin:0; height:100%; background:transparent !important; }
+    
+    /* Fix: This CSS rule hides the AR.js loader immediately upon page load,
+       preventing the blue screen from ever appearing. */
+    .arjs-loader, .arjs-loader * { display:none !important; opacity:0 !important; visibility:hidden !important; }
+
     /* Our UI */
     #hud {
       position:fixed; left:0; right:0; top:0; padding:8px 12px;
@@ -28,9 +34,6 @@
       backdrop-filter: blur(6px);
     }
     #arrow svg { width:34px; height:34px; transform-origin:50% 50%; }
-
-    /* If AR.js ever injects a loader, hide it */
-    .arjs-loader, .arjs-loader * { display:none !important; opacity:0 !important; visibility:hidden !important; }
   </style>
 </head>
 <body>
@@ -47,7 +50,7 @@
     vr-mode-ui="enabled: false"
     embedded
     renderer="alpha: true; antialias: true"
-    arjs="sourceType: webcam; videoTexture: true; debugUIEnabled: false; uiEnabled: false"  <!-- disable AR.js UI -->
+    arjs="sourceType: webcam; videoTexture: true; debugUIEnabled: false; uiEnabled: false"
     style="background: transparent !important"
   >
     <!-- Real GPS camera -->
@@ -66,18 +69,6 @@
   </a-scene>
 
   <script>
-    // Aggressively remove any AR.js loader overlay that might appear
-    function nukeArJsLoader() {
-      const els = Array.from(document.querySelectorAll('.arjs-loader, [class*="arjs-loader"]'));
-      for (const el of els) { if (el && el.parentNode) el.parentNode.removeChild(el); }
-    }
-    // Try for a few seconds in case AR.js injects late
-    document.addEventListener('DOMContentLoaded', () => {
-      let tries = 0;
-      const iv = setInterval(() => { nukeArJsLoader(); if (++tries > 40) clearInterval(iv); }, 200);
-    });
-    window.addEventListener('load', nukeArJsLoader);
-
     // URL params
     const q = new URLSearchParams(location.search);
     const title = q.get('title') || 'Flux';
@@ -149,8 +140,7 @@
         fixes++;
         const { latitude, longitude, accuracy } = pos.coords;
 
-        // Make absolutely sure no overlay covers the camera
-        nukeArJsLoader();
+        // Ensure the background is transparent after geolocation starts
         document.body.style.background = 'transparent';
 
         // Anchor Flux to the GPS target (keep 3m fallback visible)
