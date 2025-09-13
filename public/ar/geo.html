@@ -7,10 +7,13 @@
   <!-- A-Frame + AR.js -->
   <script src="https://aframe.io/releases/1.2.0/aframe.min.js"></script>
   <script src="https://raw.githack.com/AR-js-org/AR.js/3.3.3/aframe/build/aframe-ar.js"></script>
+  <!-- Supabase -->
+  <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
 
   <style>
     html, body { margin:0; height:100%; background:transparent !important; }
     .arjs-loader, .arjs-loader * { display:none !important; opacity:0 !important; visibility:hidden !important; }
+    #arjsDebugUIContainer { display:none !important; }
     #hud {
       position:fixed; left:0; right:0; top:0; padding:8px 12px;
       color:#fff; font:14px/1.35 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
@@ -50,19 +53,22 @@
     <!-- Real GPS camera -->
     <a-camera id="cam" gps-camera rotation-reader></a-camera>
 
-    <!-- Record model (slightly larger than an LP). Add rotation if needed. -->
-    <a-entity id="record"
+    <!-- Hidden template we clone for each active pin -->
+    <a-entity id="record-template"
       gltf-model="https://recordcatcher.b-cdn.net/glb/NDE1%20record.glb"
       scale="1.2 1.2 1.2"
-      position="0 0 -3"
       look-at="[gps-camera]"
-      visible="true"
-      cursor="rayOrigin: mouse"
-      raycaster="objects: #record">
+      visible="false">
     </a-entity>
   </a-scene>
 
   <script>
+    // ─── Supabase constants (your project) ───
+    const SUPABASE_URL = 'https://rlejpxhkftihlkchklwub.supabase.co';
+    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJsZWpweGhrZnRpaGxjaGtsd3ViIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTcxMDUyMDIsImV4cCI6MjA3MjY4MTIwMn0.CBunws9Ge-zi858JS7LBen6fTYV_0fZ1__D2VdjTDtM';
+    const { createClient } = supabase;
+    const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
     // URL params
     const q = new URLSearchParams(location.search);
     const title = q.get('title') || 'Record';
@@ -74,7 +80,8 @@
     const statusEl = document.getElementById('status');
     const startBtn = document.getElementById('start');
     const arrowSVG = document.querySelector('#arrow svg');
-    const recordEl = document.getElementById('record');
+    const sceneEl  = document.querySelector('a-scene');
+    const template = document.getElementById('record-template');
 
     titleEl.textContent = `${title} — Geo AR (Hunt Mode)`;
 
@@ -116,6 +123,41 @@
       if (typeof e.webkitCompassHeading === 'number') deviceHeading = e.webkitCompassHeading; // iOS
     }, true);
 
+    // Load active pins once
+    let pinsLoadedOnce = false;
+    async function loadActivePinsOnce(){
+      if (pinsLoadedOnce) return;
+      pinsLoadedOnce = true;
+      try {
+        const { data, error } = await sb
+          .from('rc_pins')
+          .select('id,title,song_url,lat,lng,is_active')
+          .eq('is_active', true)
+          .order('created_at', { ascending: false })
+          .limit(1000);
+
+        if (error) { console.warn('Pins load error:', error.message); return; }
+        if (!Array.isArray(data)) return;
+
+        data.forEach(pin => {
+          const ent = template.cloneNode(true);
+          ent.removeAttribute('id');
+          ent.setAttribute('visible', true);
+          ent.setAttribute('gps-entity-place', `latitude: ${pin.lat}; longitude: ${pin.lng};`);
+          if (pin.song_url && pin.song_url.trim()) {
+            ent.setAttribute('gltf-model', pin.song_url.trim());
+          }
+          if (link) ent.addEventListener('click', () => { window.location.href = link; });
+          sceneEl.appendChild(ent);
+        });
+      } catch (e) {
+        console.warn('Pins load exception:', e);
+      }
+    }
+
+    // Keep background transparent failsafe
+    setTimeout(() => { document.body.style.background = 'transparent'; }, 2000);
+
     // Start flow
     startBtn.addEventListener('click', async () => {
       startBtn.disabled = true;
@@ -133,16 +175,10 @@
       navigator.geolocation.watchPosition(pos => {
         fixes++;
         const { latitude, longitude, accuracy } = pos.coords;
-
-        // Ensure the background is transparent after geolocation starts
         document.body.style.background = 'transparent';
 
-        // Anchor the RECORD to the GPS target (keep 3m fallback visible)
-        if (Number.isFinite(targetLat) && Number.isFinite(targetLng)) {
-          recordEl.setAttribute('gps-entity-place', `latitude: ${targetLat}; longitude: ${targetLng};`);
-        }
+        if (fixes === 1) loadActivePinsOnce();
 
-        // HUD
         let line = `Fixes: ${fixes}  Acc: ${Math.round(accuracy||0)} m\nLat: ${latitude.toFixed(5)}  Lng: ${longitude.toFixed(5)}`;
         if (Number.isFinite(targetLat) && Number.isFinite(targetLng)) {
           const dKm = haversine(latitude, longitude, targetLat, targetLng);
@@ -152,14 +188,12 @@
         }
         statusEl.textContent = line;
 
-        // Arrow toward target
         if (deviceHeading != null && Number.isFinite(targetLat) && Number.isFinite(targetLng)){
           const brg = bearing(latitude, longitude, targetLat, targetLng);
           const turn = (brg - deviceHeading + 360) % 360;
           arrowSVG.style.transform = `rotate(${turn}deg)`;
         }
 
-        // Running → hide start
         startBtn.style.display = 'none';
       }, err => {
         statusEl.textContent = `Location error: ${err.message}`;
@@ -167,11 +201,6 @@
         startBtn.disabled = false;
       }, { enableHighAccuracy:true, timeout:10000, maximumAge:0 });
     });
-
-    // Optional: tap record to open a link
-    if (link){
-      recordEl.addEventListener('click', ()=>{ window.location.href = link; });
-    }
   </script>
 </body>
 </html>
