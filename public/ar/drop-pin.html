@@ -1,0 +1,133 @@
+<!doctype html>
+<html>
+<head>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>RC Dev — Drop Pin</title>
+  <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+  <style>
+    body{margin:0;background:#0b0b0b;color:#fff;font:15px system-ui}
+    .wrap{max-width:720px;margin:24px auto;padding:0 16px;display:grid;gap:12px}
+    .card{background:#111;border:1px solid #222;border-radius:12px;padding:12px}
+    label{opacity:.9}
+    input{padding:10px;border-radius:10px;border:1px solid #333;background:#111;color:#fff}
+    button{padding:10px 14px;border:0;border-radius:10px;font-weight:700}
+    .ok{background:#34c759;color:#000}
+    .blue{background:#0a84ff;color:#fff}
+    .red{background:#ff3b30;color:#fff}
+    .row{display:grid;gap:8px}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h2>Drop Pin (Dev)</h2>
+
+    <div class="card">
+      <div class="row">
+        <label>Email (magic link)</label>
+        <input id="email" placeholder="you@domain.com" />
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button id="login" class="blue">Send Magic Link</button>
+          <button id="logout" class="red">Logout</button>
+        </div>
+        <div id="authStatus" style="opacity:.85"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div>GPS: <span id="gps">waiting…</span></div>
+      <div class="row">
+        <label>Title</label>
+        <input id="title" placeholder="e.g. Park — 85th Street" />
+      </div>
+      <div class="row">
+        <label>Song URL (GLB or viewer)</label>
+        <input id="song" value="https://recordcatcher.b-cdn.net/glb/NDE1%20record.glb" />
+      </div>
+      <button id="drop" class="ok">Drop Pin Here</button>
+      <div id="out" style="white-space:pre-wrap;opacity:.9;margin-top:8px"></div>
+    </div>
+
+    <div class="card">
+      <a class="blue" href="./geo.html" style="display:inline-block;padding:10px 14px;border-radius:10px;color:#fff;text-decoration:none">Open Geo AR</a>
+    </div>
+  </div>
+
+  <script>
+    // Your Supabase project (from your screenshots)
+    const SUPABASE_URL = 'https://rlejpxhkftihlkchklwub.supabase.co';
+    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJsZWpweGhrZnRpaGxjaGtsd3ViIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTcxMDUyMDIsImV4cCI6MjA3MjY4MTIwMn0.CBunws9Ge-zi858JS7LBen6fTYV_0fZ1__D2VdjTDtM';
+    const MASTER_UID = '2f545801-1368-418b-8533-aa3ee41806f2'; // your master user
+
+    const { createClient } = supabase;
+    const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+    const email = document.getElementById('email');
+    const login = document.getElementById('login');
+    const logout = document.getElementById('logout');
+    const authStatus = document.getElementById('authStatus');
+    const gps = document.getElementById('gps');
+    const title = document.getElementById('title');
+    const song = document.getElementById('song');
+    const drop = document.getElementById('drop');
+    const out = document.getElementById('out');
+
+    // Auth UI
+    async function refreshAuth(){
+      const { data: { user } } = await sb.auth.getUser();
+      authStatus.textContent = user
+        ? `Signed in as: ${user.email} (${user.id === MASTER_UID ? 'MASTER' : 'not master'})`
+        : 'Not signed in';
+    }
+    login.onclick = async () => {
+      if (!email.value) return alert('Enter email');
+      const { error } = await sb.auth.signInWithOtp({ email: email.value, options: { emailRedirectTo: location.href }});
+      if (error) alert(error.message); else alert('Magic link sent. Check your email.');
+    };
+    logout.onclick = async () => { await sb.auth.signOut(); refreshAuth(); };
+    sb.auth.onAuthStateChange(() => refreshAuth());
+    refreshAuth();
+
+    // GPS watcher
+    let latestPos = null;
+    if (navigator.geolocation) {
+      navigator.geolocation.watchPosition(p => {
+        latestPos = p;
+        gps.textContent = `${p.coords.latitude.toFixed(6)}, ${p.coords.longitude.toFixed(6)} (±${Math.round(p.coords.accuracy)}m)`;
+      }, e => gps.textContent = 'Error: ' + e.message, { enableHighAccuracy:true });
+    } else {
+      gps.textContent = 'Geolocation not supported';
+    }
+
+    // Insert pin
+    drop.onclick = async () => {
+      const { data: { user } } = await sb.auth.getUser();
+      if (!user) return alert('Sign in first (magic link).');
+      if (user.id !== MASTER_UID) {
+        // RLS will block inserts for non-master; this is just a friendly heads-up
+        if (!confirm('You are not the MASTER user. Insert will likely fail. Continue anyway?')) return;
+      }
+      if (!latestPos) return alert('No GPS fix yet.');
+      const t = title.value.trim() || `Song @ ${new Date().toLocaleTimeString()}`;
+      const s = song.value.trim() || 'https://recordcatcher.b-cdn.net/glb/NDE1%20record.glb';
+      const { latitude, longitude } = latestPos.coords;
+
+      const { data, error } = await sb
+        .from('rc_pins')
+        .insert({
+          title: t,
+          song_url: s,
+          lat: latitude,
+          lng: longitude,
+          is_active: true,
+          created_by: user.id
+        })
+        .select()
+        .single();
+
+      out.textContent = error
+        ? `Insert error: ${error.message}`
+        : `Inserted:\n${JSON.stringify(data, null, 2)}`;
+    };
+  </script>
+</body>
+</html>
