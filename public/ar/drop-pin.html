@@ -71,6 +71,33 @@
     const drop = document.getElementById('drop');
     const out = document.getElementById('out');
 
+    // This function runs on page load and is crucial for handling the magic link.
+    async function finishLogin() {
+      const params = new URLSearchParams(window.location.search);
+      const code = params.get('code');
+      
+      // If a 'code' parameter exists in the URL, exchange it for a session.
+      if (code) {
+        try {
+          // This is the critical missing step! It completes the sign-in flow.
+          const { error } = await sb.auth.exchangeCodeForSession(code);
+          if (error) {
+            alert('Login failed during code exchange: ' + error.message);
+            console.error(error);
+          } else {
+            console.log('Session created successfully.');
+            // Optional: Remove the code from the URL for a cleaner look.
+            window.history.replaceState({}, document.title, window.location.pathname);
+          }
+        } catch (err) {
+          alert('Login failed during code exchange: ' + err.message);
+        }
+      }
+    }
+
+    // Call the new function right away on page load.
+    finishLogin();
+    
     // Helper to show status
     async function refreshAuth(){
       const { data: { user }, error } = await sb.auth.getUser();
@@ -99,7 +126,7 @@
       const { error } = await sb.auth.signInWithOtp({
         email: addr,
         options: {
-          emailRedirectTo: redirectTo,   // MUST be whitelisted in Supabase Auth → URL Configuration
+          emailRedirectTo: redirectTo,
           shouldCreateUser: true
         }
       });
