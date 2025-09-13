@@ -2,21 +2,15 @@
 <html lang="en">
 <head>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>Flux — Geo AR (Hunt Mode)</title>
+  <title>Record — Geo AR (Hunt Mode)</title>
 
   <!-- A-Frame + AR.js -->
-  <!-- Updated A-Frame and AR.js versions to a stable, compatible combination (1.2.0 and 3.3.3) to fix the errors. -->
   <script src="https://aframe.io/releases/1.2.0/aframe.min.js"></script>
   <script src="https://raw.githack.com/AR-js-org/AR.js/3.3.3/aframe/build/aframe-ar.js"></script>
 
   <style>
     html, body { margin:0; height:100%; background:transparent !important; }
-    
-    /* Fix: This CSS rule hides the AR.js loader immediately upon page load,
-       preventing the blue screen from ever appearing. */
     .arjs-loader, .arjs-loader * { display:none !important; opacity:0 !important; visibility:hidden !important; }
-
-    /* Our UI */
     #hud {
       position:fixed; left:0; right:0; top:0; padding:8px 12px;
       color:#fff; font:14px/1.35 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
@@ -38,7 +32,7 @@
 </head>
 <body>
   <div id="hud">
-    <div id="title">Flux — Geo AR (Hunt Mode)</div>
+    <div id="title">Record — Geo AR (Hunt Mode)</div>
     <div id="status">Tap “Start AR” and allow Camera + Precise Location.</div>
   </div>
   <button id="start">Start AR</button>
@@ -56,22 +50,22 @@
     <!-- Real GPS camera -->
     <a-camera id="cam" gps-camera rotation-reader></a-camera>
 
-    <!-- Flux: always 3m ahead (fallback) + GPS-anchored to target -->
-    <a-entity id="flux"
-      gltf-model="https://scanpacks.b-cdn.net/Walking%20Flux%20Main/Flux.glb"
-      scale="0.5 0.5 0.5"
+    <!-- Record model (slightly larger than an LP). Add rotation if needed. -->
+    <a-entity id="record"
+      gltf-model="https://recordcatcher.b-cdn.net/glb/NDE1%20record.glb"
+      scale="1.2 1.2 1.2"
       position="0 0 -3"
       look-at="[gps-camera]"
       visible="true"
       cursor="rayOrigin: mouse"
-      raycaster="objects: #flux"
-    ></a-entity>
+      raycaster="objects: #record">
+    </a-entity>
   </a-scene>
 
   <script>
     // URL params
     const q = new URLSearchParams(location.search);
-    const title = q.get('title') || 'Flux';
+    const title = q.get('title') || 'Record';
     const targetLat = parseFloat(q.get('lat') || '');
     const targetLng = parseFloat(q.get('lng') || '');
     const link = q.get('link') || '';
@@ -80,7 +74,7 @@
     const statusEl = document.getElementById('status');
     const startBtn = document.getElementById('start');
     const arrowSVG = document.querySelector('#arrow svg');
-    const fluxEl   = document.getElementById('flux');
+    const recordEl = document.getElementById('record');
 
     titleEl.textContent = `${title} — Geo AR (Hunt Mode)`;
 
@@ -143,9 +137,9 @@
         // Ensure the background is transparent after geolocation starts
         document.body.style.background = 'transparent';
 
-        // Anchor Flux to the GPS target (keep 3m fallback visible)
+        // Anchor the RECORD to the GPS target (keep 3m fallback visible)
         if (Number.isFinite(targetLat) && Number.isFinite(targetLng)) {
-          fluxEl.setAttribute('gps-entity-place', `latitude: ${targetLat}; longitude: ${targetLng};`);
+          recordEl.setAttribute('gps-entity-place', `latitude: ${targetLat}; longitude: ${targetLng};`);
         }
 
         // HUD
@@ -174,9 +168,9 @@
       }, { enableHighAccuracy:true, timeout:10000, maximumAge:0 });
     });
 
-    // Optional: tap Flux to open a link
+    // Optional: tap record to open a link
     if (link){
-      fluxEl.addEventListener('click', ()=>{ window.location.href = link; });
+      recordEl.addEventListener('click', ()=>{ window.location.href = link; });
     }
   </script>
 </body>
