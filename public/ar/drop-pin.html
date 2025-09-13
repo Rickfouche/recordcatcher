@@ -53,10 +53,10 @@
   </div>
 
   <script>
-    // Your Supabase project (from your screenshots)
+    // Your Supabase project
     const SUPABASE_URL = 'https://rlejpxhkftihlkchklwub.supabase.co';
     const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJsZWpweGhrZnRpaGxjaGtsd3ViIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTcxMDUyMDIsImV4cCI6MjA3MjY4MTIwMn0.CBunws9Ge-zi858JS7LBen6fTYV_0fZ1__D2VdjTDtM';
-    const MASTER_UID = '2f545801-1368-418b-8533-aa3ee41806f2'; // your master user
+    const MASTER_UID = '2f545801-1368-418b-8533-aa3ee41806f2';
 
     const { createClient } = supabase;
     const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -71,21 +71,59 @@
     const drop = document.getElementById('drop');
     const out = document.getElementById('out');
 
-    // Auth UI
+    // Helper to show status
     async function refreshAuth(){
-      const { data: { user } } = await sb.auth.getUser();
+      const { data: { user }, error } = await sb.auth.getUser();
+      if (error) {
+        authStatus.textContent = 'Auth error: ' + error.message;
+        return;
+      }
       authStatus.textContent = user
         ? `Signed in as: ${user.email} (${user.id === MASTER_UID ? 'MASTER' : 'not master'})`
         : 'Not signed in';
     }
-    login.onclick = async () => {
-      if (!email.value) return alert('Enter email');
-      const { error } = await sb.auth.signInWithOtp({ email: email.value, options: { emailRedirectTo: location.href }});
-      if (error) alert(error.message); else alert('Magic link sent. Check your email.');
-    };
-    logout.onclick = async () => { await sb.auth.signOut(); refreshAuth(); };
+
+    // If we just came back from the magic link, Supabase stores the session;
+    // this ensures UI updates on first load.
     sb.auth.onAuthStateChange(() => refreshAuth());
     refreshAuth();
+
+    // Login with explicit, whitelisted redirect back to THIS page
+    login.onclick = async () => {
+      const addr = email.value.trim();
+      if (!addr) return alert('Enter email');
+
+      login.disabled = true;
+      const redirectTo = `${location.origin}/ar/drop-pin.html`;
+
+      const { error } = await sb.auth.signInWithOtp({
+        email: addr,
+        options: {
+          emailRedirectTo: redirectTo,   // MUST be whitelisted in Supabase Auth → URL Configuration
+          shouldCreateUser: true
+        }
+      });
+
+      login.disabled = false;
+
+      if (error) {
+        console.error('signInWithOtp error:', error);
+        alert(
+          `Login error: ${error.message}\n\n` +
+          `Ensure this URL is whitelisted in Supabase:\n${redirectTo}`
+        );
+      } else {
+        alert('Magic link sent. Open your email and tap the link to return here signed in.');
+      }
+    };
+
+    // Logout
+    logout.onclick = async () => { 
+      logout.disabled = true;
+      await sb.auth.signOut(); 
+      await refreshAuth(); 
+      logout.disabled = false;
+    };
 
     // GPS watcher
     let latestPos = null;
@@ -103,10 +141,12 @@
       const { data: { user } } = await sb.auth.getUser();
       if (!user) return alert('Sign in first (magic link).');
       if (user.id !== MASTER_UID) {
-        // RLS will block inserts for non-master; this is just a friendly heads-up
-        if (!confirm('You are not the MASTER user. Insert will likely fail. Continue anyway?')) return;
+        if (!confirm('You are not the MASTER user. Insert will likely fail due to RLS. Continue anyway?')) return;
       }
       if (!latestPos) return alert('No GPS fix yet.');
+
+      drop.disabled = true;
+
       const t = title.value.trim() || `Song @ ${new Date().toLocaleTimeString()}`;
       const s = song.value.trim() || 'https://recordcatcher.b-cdn.net/glb/NDE1%20record.glb';
       const { latitude, longitude } = latestPos.coords;
@@ -123,6 +163,8 @@
         })
         .select()
         .single();
+
+      drop.disabled = false;
 
       out.textContent = error
         ? `Insert error: ${error.message}`
