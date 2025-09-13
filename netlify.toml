@@ -2,25 +2,42 @@
   command = "npm run build"
   publish = ".next"
 
+# Ensure Netlify knows where your functions live
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "esbuild"
+
+# (Optional but helpful) lock Node version for functions/builds
+[build.environment]
+  NODE_VERSION = "18"
+
 [[plugins]]
   package = "@netlify/plugin-nextjs"
 
-# --- Add custom redirects below ---
+# ------------- Redirects -------------
+
+# Pretty URL for the static page at public/ar/pin.html
+[[redirects]]
+  from = "/ar/pin"
+  to = "/ar/pin.html"
+  status = 200
+  force = true
 
 [[redirects]]
-from = "/ar/drop-pin"
-to = "/ar/drop-pin.html"
-status = 200
-force = true
+  from = "/ar/pin/"
+  to = "/ar/pin.html"
+  status = 200
+  force = true
+
+# (Optional) If old links exist, point them to the new page
+[[redirects]]
+  from = "/ar/drop-pin"
+  to = "/ar/pin.html"
+  status = 301
+  force = true
 
 [[redirects]]
-from = "/ar/drop-pin/"
-to = "/ar/drop-pin.html"
-status = 200
-force = true
-
-[[redirects]]
-from = "/ar/drop-pin.html"
-to = "/ar/drop-pin.html"
-status = 200
-force = true
+  from = "/ar/drop-pin/"
+  to = "/ar/pin.html"
+  status = 301
+  force = true

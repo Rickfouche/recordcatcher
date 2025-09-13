@@ -54,18 +54,19 @@
   </div>
 
   <script>
-    // ===== Supabase setup =====
+    // ===== Supabase client (for session + DB; OTP is sent server-side) =====
     const SUPABASE_URL = 'https://rlejpxhkftihlkchklwub.supabase.co';
-    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJsZWpweGhrZnRpaGxjaGtsd3ViIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTcxMDUyMDIsImV4cCI6MjA3MjY4MTIwMn0.CBunws9Ge-zi858JS7LBen6fTYV_0fZ1__D2VdjTDtM';
+    const SUPABASE_ANON_KEY =
+      'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJsZWpweGhrZnRpaGxjaGtsd3ViIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTcxMDUyMDIsImV4cCI6MjA3MjY4MTIwMn0.CBunws9Ge-zi858JS7LBen6fTYV_0fZ1__D2VdjTDtM';
+
     const MASTER_UID = '2f545801-1368-418b-8533-aa3ee41806f2';
 
     const { createClient } = supabase;
     const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-    // We want to land back on THIS file after auth
-    const CANONICAL_SELF = '/ar/pin.html';
+    const CANONICAL_SELF = '/ar/pin.html'; // after auth, land back here
 
-    // ===== UI refs =====
+    // --- UI refs ---
     const email = document.getElementById('email');
     const login = document.getElementById('login');
     const logout = document.getElementById('logout');
@@ -76,8 +77,8 @@
     const drop = document.getElementById('drop');
     const out = document.getElementById('out');
 
-    // ===== Auth status helper =====
-    async function refreshAuth(){
+    // --- Auth status ---
+    async function refreshAuth() {
       const { data, error } = await sb.auth.getUser();
       if (error) { authStatus.textContent = 'Auth error: ' + error.message; return; }
       const user = data.user;
@@ -88,7 +89,7 @@
     sb.auth.onAuthStateChange(() => refreshAuth());
     refreshAuth();
 
-    // ===== Send magic link to the universal callback =====
+    // --- Send magic link via Netlify Function (server-side) ---
     login.onclick = async () => {
       const addr = email.value.trim();
       if (!addr) return alert('Enter email');
@@ -96,24 +97,30 @@
       login.disabled = true;
 
       const redirectTo = `${location.origin}/auth/callback?next=${encodeURIComponent(CANONICAL_SELF)}`;
-      console.log('emailRedirectTo:', redirectTo);
+      console.log('emailRedirectTo (server):', redirectTo);
 
-      const { error } = await sb.auth.signInWithOtp({
-        email: addr,
-        options: { emailRedirectTo: redirectTo, shouldCreateUser: true }
-      });
-
-      login.disabled = false;
-
-      if (error) {
-        console.error('signInWithOtp error:', error);
-        alert(`Login error: ${error.message}\n\nEnsure this URL is whitelisted:\n${redirectTo}`);
-      } else {
-        alert('Magic link sent. Open it in the SAME browser (Safari on iPhone).');
+      try {
+        const res = await fetch('/.netlify/functions/send-otp', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: addr, redirectTo })
+        });
+        const txt = await res.text();
+        if (!res.ok) {
+          console.error('send-otp error:', txt);
+          alert('Login error: ' + txt);
+        } else {
+          alert('Magic link sent. Open it in the SAME browser (Safari on iPhone).');
+        }
+      } catch (e) {
+        console.error('send-otp network error:', e);
+        alert('Login error (network): ' + (e?.message || e));
+      } finally {
+        login.disabled = false;
       }
     };
 
-    // ===== Logout =====
+    // --- Logout ---
     logout.onclick = async () => {
       logout.disabled = true;
       await sb.auth.signOut();
@@ -121,28 +128,24 @@
       logout.disabled = false;
     };
 
-    // ===== GPS watcher =====
+    // --- GPS watcher ---
     let latestPos = null;
     if (navigator.geolocation) {
       navigator.geolocation.watchPosition(p => {
         latestPos = p;
         gps.textContent =
           `${p.coords.latitude.toFixed(6)}, ${p.coords.longitude.toFixed(6)} (±${Math.round(p.coords.accuracy)}m)`;
-      }, e => {
-        gps.textContent = 'Error: ' + e.message;
-      }, { enableHighAccuracy: true });
+      }, e => { gps.textContent = 'Error: ' + e.message; }, { enableHighAccuracy: true });
     } else {
       gps.textContent = 'Geolocation not supported';
     }
 
-    // ===== Insert pin =====
+    // --- Insert pin ---
     drop.onclick = async () => {
       const { data: { user } } = await sb.auth.getUser();
       if (!user) return alert('Sign in first (magic link).');
       if (!latestPos) return alert('No GPS fix yet.');
-      if (user.id !== MASTER_UID) {
-        if (!confirm('You are not the MASTER user. Insert may fail due to RLS. Continue?')) return;
-      }
+      if (user.id !== MASTER_UID && !confirm('You are not the MASTER user. Continue?')) return;
 
       drop.disabled = true;
 

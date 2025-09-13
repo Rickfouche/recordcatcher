@@ -14,19 +14,17 @@
 
   <script>
     const { createClient } = supabase;
-
-    // Supabase project
     const SUPABASE_URL = 'https://rlejpxhkftihlkchklwub.supabase.co';
-    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJsZWpweGhrZnRpaGxjaGtsd3ViIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTcxMDUyMDIsImV4cCI6MjA3MjY4MTIwMn0.CBunws9Ge-zi858JS7LBen6fTYV_0fZ1__D2VdjTDtM';
-    const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    const SUPABASE_ANON_KEY =
+      'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJsZWpweGhrZnRpaGxjaGtsd3ViIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTcxMDUyMDIsImV4cCI6MjA3MjY4MTIwMn0.CBunws9Ge-zi858JS7LBen6fTYV_0fZ1__D2VdjTDtM';
 
+    const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
     const url = new URL(location.href);
     const next = url.searchParams.get('next') || '/';
 
     (async () => {
       try {
         const code = url.searchParams.get('code');
-
         if (code) {
           const { error } = await sb.auth.exchangeCodeForSession(code);
           if (error) throw error;
@@ -34,7 +32,6 @@
           const { data: { session } } = await sb.auth.getSession();
           if (!session) throw new Error('No session from hash.');
         }
-
         history.replaceState({}, '', '/auth/callback');
         location.replace(next);
       } catch (e) {
