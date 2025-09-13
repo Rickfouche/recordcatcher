@@ -3,7 +3,10 @@
 <head>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>RC Dev — Drop Pin</title>
+
+  <!-- Supabase JS v2 (global `supabase`) -->
   <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+
   <style>
     body{margin:0;background:#0b0b0b;color:#fff;font:15px system-ui}
     .wrap{max-width:720px;margin:24px auto;padding:0 16px;display:grid;gap:12px}
@@ -30,6 +33,7 @@
           <button id="logout" class="red">Logout</button>
         </div>
         <div id="authStatus" style="opacity:.85"></div>
+        <small style="opacity:.7">Tip: on iPhone, open the email link in <b>Safari</b> (not the Gmail in-app browser).</small>
       </div>
     </div>
 
@@ -53,14 +57,22 @@
   </div>
 
   <script>
-    // Your Supabase project
+    // ===== Supabase setup (PUBLIC anon key is expected here) =====
+    // Project URL copied from Supabase → Settings → API
     const SUPABASE_URL = 'https://rlejpxhkftihlkchklwub.supabase.co';
+    // Your public anon key (okay to expose in browser apps with RLS enabled)
     const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJsZWpweGhrZnRpaGxjaGtsd3ViIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTcxMDUyMDIsImV4cCI6MjA3MjY4MTIwMn0.CBunws9Ge-zi858JS7LBen6fTYV_0fZ1__D2VdjTDtM';
+
+    // Optional: the "master" user id you want to allow to insert
     const MASTER_UID = '2f545801-1368-418b-8533-aa3ee41806f2';
 
     const { createClient } = supabase;
     const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+    // Canonical path (matches your Netlify redirects and Supabase allow-list)
+    const CANONICAL_PATH = '/ar/drop-pin'; // no .html
+
+    // ===== UI refs =====
     const email = document.getElementById('email');
     const login = document.getElementById('login');
     const logout = document.getElementById('logout');
@@ -71,57 +83,77 @@
     const drop = document.getElementById('drop');
     const out = document.getElementById('out');
 
-    // This function runs on page load and is crucial for handling the magic link.
-    async function finishLogin() {
-      const params = new URLSearchParams(window.location.search);
-      const code = params.get('code');
-      
-      // If a 'code' parameter exists in the URL, exchange it for a session.
-      if (code) {
-        try {
-          // This is the critical missing step! It completes the sign-in flow.
-          const { error } = await sb.auth.exchangeCodeForSession(code);
-          if (error) {
-            alert('Login failed during code exchange: ' + error.message);
-            console.error(error);
-          } else {
-            console.log('Session created successfully.');
-            // Optional: Remove the code from the URL for a cleaner look.
-            window.history.replaceState({}, document.title, window.location.pathname);
-          }
-        } catch (err) {
-          alert('Login failed during code exchange: ' + err.message);
-        }
+    // ===== URL normalization (keeps address bar on /ar/drop-pin) =====
+    (function normalizeToCanonical(){
+      const url = new URL(location.href);
+      if (url.pathname !== CANONICAL_PATH) {
+        // Don't navigate — just clean what we show after auth completes
+        // (Netlify rewrites already serve drop-pin.html)
+        // We'll replaceState after finishing auth below.
       }
-    }
+    })();
 
-    // Call the new function right away on page load.
-    finishLogin();
-    
-    // Helper to show status
+    // ===== Auth status helper =====
     async function refreshAuth(){
-      const { data: { user }, error } = await sb.auth.getUser();
+      const { data, error } = await sb.auth.getUser();
       if (error) {
         authStatus.textContent = 'Auth error: ' + error.message;
         return;
       }
+      const user = data.user;
       authStatus.textContent = user
         ? `Signed in as: ${user.email} (${user.id === MASTER_UID ? 'MASTER' : 'not master'})`
         : 'Not signed in';
     }
 
-    // If we just came back from the magic link, Supabase stores the session;
-    // this ensures UI updates on first load.
     sb.auth.onAuthStateChange(() => refreshAuth());
     refreshAuth();
 
-    // Login with explicit, whitelisted redirect back to THIS page
+    // ===== Finish login on landing (handles ?code= and #access_token=) =====
+    async function finishLogin() {
+      const href = location.href;
+      const url = new URL(href);
+      const code = url.searchParams.get('code');
+
+      try {
+        if (code) {
+          const { error } = await sb.auth.exchangeCodeForSession(code);
+          if (error) throw error;
+          // Clean querystring and normalize path in address bar
+          history.replaceState({}, document.title, CANONICAL_PATH);
+          console.log('Logged in via code exchange.');
+          return;
+        }
+
+        // Some providers/browsers deliver a hash with access_token
+        if (href.includes('#access_token=')) {
+          // Supabase JS picks up the hash on init; just verify session shortly
+          setTimeout(async () => {
+            const { data: { session } } = await sb.auth.getSession();
+            if (session) {
+              history.replaceState({}, document.title, CANONICAL_PATH);
+              console.log('Logged in via hash fragment.');
+            } else {
+              alert('Could not finalize session from hash.');
+            }
+          }, 0);
+        }
+      } catch (err) {
+        console.error(err);
+        alert('Login failed: ' + (err?.message || err));
+      }
+    }
+    finishLogin();
+
+    // ===== Send magic link (explicit redirect to canonical path) =====
     login.onclick = async () => {
       const addr = email.value.trim();
       if (!addr) return alert('Enter email');
 
       login.disabled = true;
-      const redirectTo = `${location.origin}/ar/drop-pin.html`;
+
+      const redirectTo = `${location.origin}${CANONICAL_PATH}`;
+      console.log('emailRedirectTo:', redirectTo);
 
       const { error } = await sb.auth.signInWithOtp({
         email: addr,
@@ -140,35 +172,38 @@
           `Ensure this URL is whitelisted in Supabase:\n${redirectTo}`
         );
       } else {
-        alert('Magic link sent. Open your email and tap the link to return here signed in.');
+        alert('Magic link sent. Open it in the SAME browser (Safari on iPhone).');
       }
     };
 
-    // Logout
-    logout.onclick = async () => { 
+    // ===== Logout =====
+    logout.onclick = async () => {
       logout.disabled = true;
-      await sb.auth.signOut(); 
-      await refreshAuth(); 
+      await sb.auth.signOut();
+      await refreshAuth();
       logout.disabled = false;
     };
 
-    // GPS watcher
+    // ===== GPS watcher =====
     let latestPos = null;
     if (navigator.geolocation) {
       navigator.geolocation.watchPosition(p => {
         latestPos = p;
-        gps.textContent = `${p.coords.latitude.toFixed(6)}, ${p.coords.longitude.toFixed(6)} (±${Math.round(p.coords.accuracy)}m)`;
-      }, e => gps.textContent = 'Error: ' + e.message, { enableHighAccuracy:true });
+        gps.textContent =
+          `${p.coords.latitude.toFixed(6)}, ${p.coords.longitude.toFixed(6)} (±${Math.round(p.coords.accuracy)}m)`;
+      }, e => {
+        gps.textContent = 'Error: ' + e.message;
+      }, { enableHighAccuracy: true });
     } else {
       gps.textContent = 'Geolocation not supported';
     }
 
-    // Insert pin
+    // ===== Insert pin =====
     drop.onclick = async () => {
       const { data: { user } } = await sb.auth.getUser();
       if (!user) return alert('Sign in first (magic link).');
       if (user.id !== MASTER_UID) {
-        if (!confirm('You are not the MASTER user. Insert will likely fail due to RLS. Continue anyway?')) return;
+        if (!confirm('You are not the MASTER user. Insert may fail due to RLS. Continue?')) return;
       }
       if (!latestPos) return alert('No GPS fix yet.');
 
