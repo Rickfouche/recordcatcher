@@ -15,38 +15,33 @@
   <script>
     const { createClient } = supabase;
 
-    // YOUR Supabase project URL + anon key
+    // Supabase project
     const SUPABASE_URL = 'https://rlejpxhkftihlkchklwub.supabase.co';
     const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJsZWpweGhrZnRpaGxjaGtsd3ViIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTcxMDUyMDIsImV4cCI6MjA3MjY4MTIwMn0.CBunws9Ge-zi858JS7LBen6fTYV_0fZ1__D2VdjTDtM';
     const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-    // Where to send the user after we finish (default to home if missing)
-    const url  = new URL(location.href);
+    const url = new URL(location.href);
     const next = url.searchParams.get('next') || '/';
 
-    async function finish() {
-      const href = location.href;
-      const code = url.searchParams.get('code');
+    (async () => {
       try {
+        const code = url.searchParams.get('code');
+
         if (code) {
-          // PKCE path (?code=...)
           const { error } = await sb.auth.exchangeCodeForSession(code);
           if (error) throw error;
-        } else if (href.includes('#access_token=')) {
-          // Hash fragment path (#access_token=...)
+        } else if (location.hash.includes('access_token=')) {
           const { data: { session } } = await sb.auth.getSession();
           if (!session) throw new Error('No session from hash.');
-        } // else: direct visit, just continue
+        }
 
-        // Clean URL (optional), then forward
         history.replaceState({}, '', '/auth/callback');
         location.replace(next);
       } catch (e) {
         document.getElementById('msg').textContent = 'Auth error: ' + (e?.message || e);
         console.error(e);
       }
-    }
-    finish();
+    })();
   </script>
 </body>
 </html>
