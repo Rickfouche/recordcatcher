@@ -2,19 +2,20 @@
   command = "npm run build"
   publish = ".next"
 
-# Ensure Netlify knows where your functions live
+# Serverless functions config
 [functions]
   directory = "netlify/functions"
   node_bundler = "esbuild"
 
-# (Optional but helpful) lock Node version for functions/builds
+# Lock Node for both build and functions
 [build.environment]
   NODE_VERSION = "18"
 
+# Next.js on Netlify
 [[plugins]]
   package = "@netlify/plugin-nextjs"
 
-# ------------- Redirects -------------
+# ---------------- Redirects ----------------
 
 # Pretty URL for the static page at public/ar/pin.html
 [[redirects]]
@@ -29,7 +30,7 @@
   status = 200
   force = true
 
-# (Optional) If old links exist, point them to the new page
+# Legacy paths -> new page
 [[redirects]]
   from = "/ar/drop-pin"
   to = "/ar/pin.html"
