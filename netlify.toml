@@ -4,3 +4,23 @@
 
 [[plugins]]
   package = "@netlify/plugin-nextjs"
+
+# --- Add custom redirects below ---
+
+[[redirects]]
+from = "/ar/drop-pin"
+to = "/ar/drop-pin.html"
+status = 200
+force = true
+
+[[redirects]]
+from = "/ar/drop-pin/"
+to = "/ar/drop-pin.html"
+status = 200
+force = true
+
+[[redirects]]
+from = "/ar/drop-pin.html"
+to = "/ar/drop-pin.html"
+status = 200
+force = true
