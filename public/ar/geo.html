@@ -59,8 +59,6 @@
 
     <!-- The GLB model -->
     <a-entity id="model"
-      gltf-model=""
-      crossorigin="anonymous"
       gps-entity-place="latitude:0; longitude:0;"
       scale="8 8 8"
       rotation="0 0 0"
@@ -76,7 +74,7 @@
     const lat = toNum(params.get('lat'));
     const lng = toNum(params.get('lng'));
     const modelUrl = params.get('model') ||
-      'https://recordcatcher.b-cdn.net/glb/NDE1%20record.glb';
+      'https://recordcatcher.b-cdn.net/glb/Recdemo.glb';
 
     const statusEl = $('#status');
     const coordsEl = $('#coords');
@@ -90,8 +88,9 @@
       coordsEl.textContent = `lat: ${lat.toFixed(6)}, lng: ${lng.toFixed(6)}`;
     }
 
-    // Place model + marker
-    modelEl.setAttribute('gltf-model', modelUrl);
+    // Set model + place it
+    modelEl.setAttribute('gltf-model',
+      `src: ${modelUrl}; dracoDecoderPath: https://www.gstatic.com/draco/v1/decoders/; ktx2TranscoderPath: https://storage.googleapis.com/gltf-tmp/;`);
     modelEl.setAttribute('gps-entity-place', `latitude: ${lat}; longitude: ${lng};`);
     markerEl.setAttribute('gps-entity-place', `latitude: ${lat}; longitude: ${lng};`);
 
@@ -109,9 +108,6 @@
     // GPS status
     window.addEventListener('gps-camera-origin-coord-set', () => {
       statusEl.textContent = 'Origin set. Rendering at target.';
-    });
-    window.addEventListener('gps-camera-update-position', () => {
-      // Keep brief; too much text flashes
     });
 
     // Controls
@@ -150,7 +146,8 @@
               try { await DeviceOrientationEvent.requestPermission(); } catch (_) {}
             }
             if (res === 'granted') gate.style.display = 'none';
-          } catch (e) { console.warn('Motion permission error:', e); }
+          } catch (e) { console.warn('Motion permission error:', e);
+          }
         };
       }
     });
