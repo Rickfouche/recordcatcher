@@ -55,6 +55,9 @@
       <div style="display:grid;gap:8px;margin-top:8px">
         <button id="dropAdmin" class="ok">Admin Drop (No Login)</button>
         <button id="dropClient" class="gray">Client Insert (Needs Login)</button>
+
+        <!-- NEW: instant AR viewer jump (no auth, no DB) -->
+        <button id="openHere" class="blue">Open Geo AR Here (No Auth)</button>
       </div>
 
       <div id="out" class="mono" style="white-space:pre-wrap;opacity:.9;margin-top:8px"></div>
@@ -88,6 +91,7 @@
     const dropAdmin = document.getElementById('dropAdmin');
     const dropClient = document.getElementById('dropClient');
     const out = document.getElementById('out');
+    const openHere = document.getElementById('openHere');
 
     // ===== Auth status (client only) =====
     async function refreshAuth() {
@@ -153,17 +157,43 @@
     function getTrackIdFromUrl(url) {
       try {
         const u = new URL(url);
-        // cheap track id: filename without query
         const parts = u.pathname.split('/');
         return decodeURIComponent(parts[parts.length - 1] || 'unknown');
       } catch { return 'unknown'; }
     }
-
     function show(result) {
       out.textContent = typeof result === 'string'
         ? result
         : JSON.stringify(result, null, 2);
     }
+
+    // ===== NEW: Open Geo AR Here (no auth / no DB) =====
+    openHere.onclick = () => {
+      const model = encodeURIComponent((song.value || '').trim()
+        || 'https://recordcatcher.b-cdn.net/glb/NDE1%20record.glb');
+
+      if (!navigator.geolocation) {
+        alert('Geolocation not supported on this device/browser.');
+        return;
+      }
+      openHere.disabled = true;
+      const restore = () => (openHere.disabled = false);
+
+      navigator.geolocation.getCurrentPosition(
+        (p) => {
+          const lat = p.coords.latitude.toFixed(6);
+          const lng = p.coords.longitude.toFixed(6);
+          if (gps) gps.textContent = `${lat}, ${lng} (±${Math.round(p.coords.accuracy)}m)`;
+          location.href = `/ar/geo.html?lat=${lat}&lng=${lng}&model=${model}`;
+          restore();
+        },
+        (err) => {
+          alert('Location error: ' + err.message + '\n• Go outside / enable GPS\n• On iPhone use Safari');
+          restore();
+        },
+        { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+      );
+    };
 
     // ===== 1) ADMIN DROP (no login) — calls Netlify function =====
     dropAdmin.onclick = async () => {
@@ -181,14 +211,11 @@
 
       dropAdmin.disabled = true;
       try {
-        // This payload matches the example function I gave you.
-        // If your function inserts into `rc_pins`, update that function to accept these fields.
         const payload = {
           lat: latitude,
           lng: longitude,
           track_id: getTrackIdFromUrl(s),
           note: t,
-          // Optional extras if your server chooses to store them:
           title: t,
           song_url: s,
           is_active: true
@@ -234,7 +261,6 @@
       const { latitude, longitude } = latestPos.coords;
 
       try {
-        // Adjust columns to match your rc_pins schema
         const { data, error } = await sb
           .from('rc_pins')
           .insert({

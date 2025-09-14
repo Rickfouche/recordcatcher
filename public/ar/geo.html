@@ -2,204 +2,158 @@
 <html lang="en">
 <head>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>Record — Geo AR (Hunt Mode)</title>
+  <title>Geo AR — Drop-in Viewer</title>
 
-  <!-- A-Frame + AR.js -->
+  <!-- A-Frame + AR.js (stable combo) -->
   <script src="https://aframe.io/releases/1.2.0/aframe.min.js"></script>
-  <script src="https://raw.githack.com/AR-js-org/AR.js/3.3.3/aframe/build/aframe-ar.js"></script>
-  <!-- Supabase -->
-  <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+  <script src="https://raw.githack.com/AR-js-org/AR.js/3.3.3/aframe/build/aframe-ar-nft.js"></script>
 
   <style>
-    html, body { margin:0; height:100%; background:transparent !important; }
-    .arjs-loader, .arjs-loader * { display:none !important; opacity:0 !important; visibility:hidden !important; }
-    #arjsDebugUIContainer { display:none !important; }
+    html, body { margin:0; height:100%; overflow:hidden; background:#000; }
     #hud {
-      position:fixed; left:0; right:0; top:0; padding:8px 12px;
-      color:#fff; font:14px/1.35 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
-      background:linear-gradient(180deg, rgba(0,0,0,.7), rgba(0,0,0,0)); z-index:10; white-space:pre-wrap;
+      position:fixed; top:10px; left:50%; transform:translateX(-50%);
+      background:rgba(0,0,0,.6); color:#fff; font:14px system-ui;
+      padding:8px 12px; border-radius:10px; z-index:10; text-align:center;
     }
-    #status { opacity:.95 }
-    #start {
-      position:fixed; left:12px; bottom:12px; z-index:11;
-      padding:10px 14px; border:0; border-radius:10px;
-      background:#0a84ff; color:#fff; font:600 14px system-ui;
+    #hud small { opacity:.8; }
+    #btns { margin-top:6px; display:flex; gap:6px; justify-content:center; flex-wrap:wrap; }
+    button { padding:6px 10px; border:0; border-radius:8px; font-weight:700; cursor:pointer; }
+    #motionGate {
+      position:fixed; inset:0; display:none; place-items:center; z-index:9999;
+      background:rgba(0,0,0,.85); color:#fff; text-align:center; padding:24px;
+      font:16px system-ui;
     }
-    #arrow {
-      position:fixed; right:12px; bottom:12px; width:56px; height:56px; z-index:11;
-      border-radius:50%; background:rgba(0,0,0,.55); display:flex; align-items:center; justify-content:center;
-      backdrop-filter: blur(6px);
-    }
-    #arrow svg { width:34px; height:34px; transform-origin:50% 50%; }
+    #motionGate button { margin-top:12px; }
   </style>
 </head>
 <body>
-  <div id="hud">
-    <div id="title">Record — Geo AR (Hunt Mode)</div>
-    <div id="status">Tap “Start AR” and allow Camera + Precise Location.</div>
+  <!-- iOS motion permission gate -->
+  <div id="motionGate">
+    <div>
+      <div style="font-weight:700;font-size:18px;margin-bottom:6px">Enable motion & camera</div>
+      <div>Tap allow to enable motion/orientation for AR on iPhone.</div>
+      <button id="enableMotion">Enable</button>
+    </div>
   </div>
-  <button id="start">Start AR</button>
-  <div id="arrow" title="Turn until arrow points up">
-    <svg viewBox="0 0 24 24" fill="#fff"><path d="M12 2l4.5 8h-9L12 2zm0 5a1 1 0 110 2 1 1 0 010-2zM10 22v-8h4v8h-4z"/></svg>
+
+  <div id="hud">
+    <div id="status">Loading…</div>
+    <small id="coords"></small>
+    <div id="btns">
+      <button id="bigger">Scale +</button>
+      <button id="smaller">Scale −</button>
+      <button id="spin">Spin</button>
+      <button id="reset">Reset</button>
+    </div>
   </div>
 
   <a-scene
-    vr-mode-ui="enabled: false"
+    vr-mode-ui="enabled:false"
+    renderer="antialias:true; alpha:true;"
     embedded
-    renderer="alpha: true; antialias: true"
-    arjs="sourceType: webcam; videoTexture: true; debugUIEnabled: false; uiEnabled: false"
-    style="background: transparent !important"
-  >
-    <!-- Real GPS camera -->
-    <a-camera id="cam" gps-camera rotation-reader></a-camera>
+    arjs="sourceType: webcam; videoTexture: true; debugUIEnabled: false; trackingMethod: best;">
 
-    <!-- Hidden template we clone for each active pin -->
-    <a-entity id="record-template"
-      gltf-model="https://recordcatcher.b-cdn.net/glb/NDE1%20record.glb"
-      scale="1.2 1.2 1.2"
-      look-at="[gps-camera]"
-      visible="false">
+    <!-- AR.js GPS camera (no rotation-reader) -->
+    <a-camera gps-camera></a-camera>
+
+    <!-- Our model -->
+    <a-entity id="model"
+      gltf-model=""
+      crossorigin="anonymous"
+      gps-entity-place="latitude:0; longitude:0;"
+      scale="1 1 1"
+      rotation="0 0 0"
+      animation__spin="property: rotation; to: 0 360 0; loop: true; dur: 8000; autoplay: false">
     </a-entity>
   </a-scene>
 
   <script>
-    // ─── Supabase constants (your project) ───
-    const SUPABASE_URL = 'https://rlejpxhkftihlkchklwub.supabase.co';
-    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJsZWpweGhrZnRpaGxjaGtsd3ViIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTcxMDUyMDIsImV4cCI6MjA3MjY4MTIwMn0.CBunws9Ge-zi858JS7LBen6fTYV_0fZ1__D2VdjTDtM';
-    const { createClient } = supabase;
-    const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    // --- Utils ---
+    const $ = sel => document.querySelector(sel);
+    const params = new URLSearchParams(location.search);
+    const toNum = v => (v==null ? NaN : Number(v));
 
-    // URL params
-    const q = new URLSearchParams(location.search);
-    const title = q.get('title') || 'Record';
-    const targetLat = parseFloat(q.get('lat') || '');
-    const targetLng = parseFloat(q.get('lng') || '');
-    const link = q.get('link') || '';
+    // Required URL params
+    const lat = toNum(params.get('lat'));
+    const lng = toNum(params.get('lng'));
+    const modelUrl = params.get('model') ||
+      'https://recordcatcher.b-cdn.net/glb/NDE1%20record.glb'; // default
 
-    const titleEl  = document.getElementById('title');
-    const statusEl = document.getElementById('status');
-    const startBtn = document.getElementById('start');
-    const arrowSVG = document.querySelector('#arrow svg');
-    const sceneEl  = document.querySelector('a-scene');
-    const template = document.getElementById('record-template');
+    const statusEl = $('#status');
+    const coordsEl = $('#coords');
+    const modelEl = $('#model');
 
-    titleEl.textContent = `${title} — Geo AR (Hunt Mode)`;
-
-    // Utils
-    const toRad = v => v * Math.PI/180;
-    const toDeg = v => v * 180/Math.PI;
-    function haversine(lat1, lon1, lat2, lon2){
-      const R=6371, dLat=toRad(lat2-lat1), dLon=toRad(lon2-lon1);
-      const a=Math.sin(dLat/2)**2 + Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLon/2)**2;
-      return 2*R*Math.asin(Math.sqrt(a));
-    }
-    function bearing(lat1, lon1, lat2, lon2){
-      const y = Math.sin(toRad(lon2-lon1)) * Math.cos(toRad(lat2));
-      const x = Math.cos(toRad(lat1))*Math.sin(toRad(lat2)) -
-                Math.sin(toRad(lat1))*Math.cos(toRad(lat2))*Math.cos(toRad(lon2-lon1));
-      return (toDeg(Math.atan2(y,x)) + 360) % 360;
+    // Validate
+    if (isNaN(lat) || isNaN(lng)) {
+      statusEl.textContent = 'Missing or invalid lat/lng in URL.';
+    } else {
+      coordsEl.textContent = `lat: ${lat.toFixed(6)}, lng: ${lng.toFixed(6)}`;
     }
 
-    // iOS motion/compass permission
-    async function requestMotion(){
-      try{
-        if (typeof DeviceMotionEvent !== 'undefined' &&
-            typeof DeviceMotionEvent.requestPermission === 'function') {
-          await DeviceMotionEvent.requestPermission();
-        }
-        if (typeof DeviceOrientationEvent !== 'undefined' &&
-            typeof DeviceOrientationEvent.requestPermission === 'function') {
-          await DeviceOrientationEvent.requestPermission();
-        }
-      }catch(_) {}
-    }
+    // Apply model + position
+    modelEl.setAttribute('gltf-model', modelUrl);
+    modelEl.setAttribute('gps-entity-place', `latitude: ${lat}; longitude: ${lng};`);
 
-    // Track heading for arrow
-    let deviceHeading = null;
-    window.addEventListener('deviceorientationabsolute', e => {
-      if (e.absolute && typeof e.alpha === 'number') deviceHeading = (360 - e.alpha) % 360;
-    }, true);
-    window.addEventListener('deviceorientation', e => {
-      if (typeof e.webkitCompassHeading === 'number') deviceHeading = e.webkitCompassHeading; // iOS
-    }, true);
+    // Controls
+    let baseScale = 1;
+    $('#bigger').onclick = () => {
+      baseScale *= 1.25;
+      modelEl.setAttribute('scale', `${baseScale} ${baseScale} ${baseScale}`);
+    };
+    $('#smaller').onclick = () => {
+      baseScale = Math.max(0.1, baseScale / 1.25);
+      modelEl.setAttribute('scale', `${baseScale} ${baseScale} ${baseScale}`);
+    };
+    let spinning = false;
+    $('#spin').onclick = () => {
+      spinning = !spinning;
+      modelEl.setAttribute('animation__spin',
+        `property: rotation; to: 0 360 0; loop: true; dur: 8000; autoplay: ${spinning}`);
+    };
+    $('#reset').onclick = () => {
+      baseScale = 1;
+      spinning = false;
+      modelEl.setAttribute('scale', '1 1 1');
+      modelEl.setAttribute('rotation', '0 0 0');
+      modelEl.setAttribute('animation__spin',
+        'property: rotation; to: 0 360 0; loop: true; dur: 8000; autoplay: false');
+    };
 
-    // Load active pins once
-    let pinsLoadedOnce = false;
-    async function loadActivePinsOnce(){
-      if (pinsLoadedOnce) return;
-      pinsLoadedOnce = true;
-      try {
-        const { data, error } = await sb
-          .from('rc_pins')
-          .select('id,title,song_url,lat,lng,is_active')
-          .eq('is_active', true)
-          .order('created_at', { ascending: false })
-          .limit(1000);
+    // Helpful status
+    window.addEventListener('gps-camera-update-position', () => {
+      statusEl.textContent = 'GPS locked. Walk toward the target point.';
+    });
+    window.addEventListener('gps-camera-origin-coord-set', () => {
+      statusEl.textContent = 'Origin set. Rendering model at target.';
+    });
 
-        if (error) { console.warn('Pins load error:', error.message); return; }
-        if (!Array.isArray(data)) return;
+    // iOS motion permission flow
+    document.addEventListener('DOMContentLoaded', async () => {
+      statusEl.textContent = 'Allow camera, motion & location. If blank, reload and move phone.';
 
-        data.forEach(pin => {
-          const ent = template.cloneNode(true);
-          ent.removeAttribute('id');
-          ent.setAttribute('visible', true);
-          ent.setAttribute('gps-entity-place', `latitude: ${pin.lat}; longitude: ${pin.lng};`);
-          if (pin.song_url && pin.song_url.trim()) {
-            ent.setAttribute('gltf-model', pin.song_url.trim());
+      const gate = document.getElementById('motionGate');
+      const btn = document.getElementById('enableMotion');
+
+      const needsIOSPermission =
+        typeof DeviceMotionEvent !== 'undefined' &&
+        typeof DeviceMotionEvent.requestPermission === 'function';
+
+      if (needsIOSPermission) {
+        gate.style.display = 'grid';
+        btn.onclick = async () => {
+          try {
+            const res = await DeviceMotionEvent.requestPermission();
+            // Some iOS versions also require orientation:
+            if (typeof DeviceOrientationEvent !== 'undefined' &&
+                typeof DeviceOrientationEvent.requestPermission === 'function') {
+              try { await DeviceOrientationEvent.requestPermission(); } catch (_) {}
+            }
+            if (res === 'granted') gate.style.display = 'none';
+          } catch (e) {
+            console.warn('Motion permission error:', e);
           }
-          if (link) ent.addEventListener('click', () => { window.location.href = link; });
-          sceneEl.appendChild(ent);
-        });
-      } catch (e) {
-        console.warn('Pins load exception:', e);
+        };
       }
-    }
-
-    // Keep background transparent failsafe
-    setTimeout(() => { document.body.style.background = 'transparent'; }, 2000);
-
-    // Start flow
-    startBtn.addEventListener('click', async () => {
-      startBtn.disabled = true;
-      startBtn.textContent = 'Starting…';
-      await requestMotion();
-
-      if (!navigator.geolocation){
-        statusEl.textContent = 'Geolocation not supported.';
-        startBtn.textContent = 'Start AR';
-        startBtn.disabled = false;
-        return;
-      }
-
-      let fixes = 0;
-      navigator.geolocation.watchPosition(pos => {
-        fixes++;
-        const { latitude, longitude, accuracy } = pos.coords;
-        document.body.style.background = 'transparent';
-
-        if (fixes === 1) loadActivePinsOnce();
-
-        let line = `Fixes: ${fixes}  Acc: ${Math.round(accuracy||0)} m\nLat: ${latitude.toFixed(5)}  Lng: ${longitude.toFixed(5)}`;
-        if (Number.isFinite(targetLat) && Number.isFinite(targetLng)) {
-          const dKm = haversine(latitude, longitude, targetLat, targetLng);
-          line += dKm < 0.01 ? `\nDistance: ${(dKm*1000).toFixed(0)} m` : `\nDistance: ${dKm.toFixed(2)} km`;
-        } else {
-          line += `\nNo target set (?lat=&lng=)`;
-        }
-        statusEl.textContent = line;
-
-        if (deviceHeading != null && Number.isFinite(targetLat) && Number.isFinite(targetLng)){
-          const brg = bearing(latitude, longitude, targetLat, targetLng);
-          const turn = (brg - deviceHeading + 360) % 360;
-          arrowSVG.style.transform = `rotate(${turn}deg)`;
-        }
-
-        startBtn.style.display = 'none';
-      }, err => {
-        statusEl.textContent = `Location error: ${err.message}`;
-        startBtn.textContent = 'Start AR';
-        startBtn.disabled = false;
-      }, { enableHighAccuracy:true, timeout:10000, maximumAge:0 });
     });
   </script>
 </body>
