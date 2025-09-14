@@ -3,6 +3,7 @@
 <head>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>RC Dev — Drop Pin</title>
+  <!-- Browser-side Supabase (only used for client insert + session) -->
   <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
   <style>
     body{margin:0;background:#0b0b0b;color:#fff;font:15px system-ui}
@@ -10,17 +11,21 @@
     .card{background:#111;border:1px solid #222;border-radius:12px;padding:12px}
     label{opacity:.9}
     input{padding:10px;border-radius:10px;border:1px solid #333;background:#111;color:#fff}
-    button{padding:10px 14px;border:0;border-radius:10px;font-weight:700}
+    button{padding:10px 14px;border:0;border-radius:10px;font-weight:700;cursor:pointer}
     .ok{background:#34c759;color:#000}
     .blue{background:#0a84ff;color:#fff}
     .red{background:#ff3b30;color:#fff}
+    .gray{background:#2c2c2e;color:#fff}
     .row{display:grid;gap:8px}
+    .hint{opacity:.7}
+    .mono{font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace}
   </style>
 </head>
 <body>
   <div class="wrap">
     <h2>Drop Pin (Dev)</h2>
 
+    <!-- AUTH CARD (kept for client-side insert) -->
     <div class="card">
       <div class="row">
         <label>Email (magic link)</label>
@@ -30,10 +35,11 @@
           <button id="logout" class="red">Logout</button>
         </div>
         <div id="authStatus" style="opacity:.85"></div>
-        <small style="opacity:.7">Tip: on iPhone, open the email link in <b>Safari</b> (not the Gmail in-app browser).</small>
+        <small class="hint">Tip: on iPhone, open the email link in <b>Safari</b> (not the Gmail in-app browser).</small>
       </div>
     </div>
 
+    <!-- PIN FORM -->
     <div class="card">
       <div>GPS: <span id="gps">waiting…</span></div>
       <div class="row">
@@ -44,8 +50,14 @@
         <label>Song URL (GLB or viewer)</label>
         <input id="song" value="https://recordcatcher.b-cdn.net/glb/NDE1%20record.glb" />
       </div>
-      <button id="drop" class="ok">Drop Pin Here</button>
-      <div id="out" style="white-space:pre-wrap;opacity:.9;margin-top:8px"></div>
+
+      <!-- Buttons: admin (no login) and client (needs login) -->
+      <div style="display:grid;gap:8px;margin-top:8px">
+        <button id="dropAdmin" class="ok">Admin Drop (No Login)</button>
+        <button id="dropClient" class="gray">Client Insert (Needs Login)</button>
+      </div>
+
+      <div id="out" class="mono" style="white-space:pre-wrap;opacity:.9;margin-top:8px"></div>
     </div>
 
     <div class="card">
@@ -54,51 +66,48 @@
   </div>
 
   <script>
-    // ===== Supabase client (for session + DB; OTP is sent server-side) =====
+    // ===== Config =====
     const SUPABASE_URL = 'https://rlejpxhkftihlkchklwub.supabase.co';
     const SUPABASE_ANON_KEY =
       'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJsZWpweGhrZnRpaGxjaGtsd3ViIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTcxMDUyMDIsImV4cCI6MjA3MjY4MTIwMn0.CBunws9Ge-zi858JS7LBen6fTYV_0fZ1__D2VdjTDtM';
+    const MASTER_UID = '2f545801-1368-418b-8533-aa3ee41806f2'; // optional
+    const CANONICAL_SELF = '/ar/pin.html';
 
-    const MASTER_UID = '2f545801-1368-418b-8533-aa3ee41806f2';
-
+    // ===== Supabase client (for client insert + session only) =====
     const { createClient } = supabase;
     const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-    const CANONICAL_SELF = '/ar/pin.html'; // after auth, land back here
-
-    // --- UI refs ---
+    // ===== UI refs =====
     const email = document.getElementById('email');
     const login = document.getElementById('login');
-    const logout = document.getElementById('logout');
+    const logoutBtn = document.getElementById('logout');
     const authStatus = document.getElementById('authStatus');
     const gps = document.getElementById('gps');
     const title = document.getElementById('title');
     const song = document.getElementById('song');
-    const drop = document.getElementById('drop');
+    const dropAdmin = document.getElementById('dropAdmin');
+    const dropClient = document.getElementById('dropClient');
     const out = document.getElementById('out');
 
-    // --- Auth status ---
+    // ===== Auth status (client only) =====
     async function refreshAuth() {
       const { data, error } = await sb.auth.getUser();
       if (error) { authStatus.textContent = 'Auth error: ' + error.message; return; }
       const user = data.user;
       authStatus.textContent = user
-        ? `Signed in as: ${user.email} (${user.id === MASTER_UID ? 'MASTER' : 'not master'})`
+        ? `Signed in as: ${user.email} (${user.id === MASTER_UID ? 'MASTER' : 'user'})`
         : 'Not signed in';
     }
     sb.auth.onAuthStateChange(() => refreshAuth());
     refreshAuth();
 
-    // --- Send magic link via Netlify Function (server-side) ---
+    // ===== Send magic link (server-side function) =====
     login.onclick = async () => {
-      const addr = email.value.trim();
+      const addr = (email.value || '').trim();
       if (!addr) return alert('Enter email');
 
       login.disabled = true;
-
       const redirectTo = `${location.origin}/auth/callback?next=${encodeURIComponent(CANONICAL_SELF)}`;
-      console.log('emailRedirectTo (server):', redirectTo);
-
       try {
         const res = await fetch('/.netlify/functions/send-otp', {
           method: 'POST',
@@ -120,15 +129,15 @@
       }
     };
 
-    // --- Logout ---
-    logout.onclick = async () => {
-      logout.disabled = true;
+    // ===== Logout (client only) =====
+    logoutBtn.onclick = async () => {
+      logoutBtn.disabled = true;
       await sb.auth.signOut();
       await refreshAuth();
-      logout.disabled = false;
+      logoutBtn.disabled = false;
     };
 
-    // --- GPS watcher ---
+    // ===== GPS watcher =====
     let latestPos = null;
     if (navigator.geolocation) {
       navigator.geolocation.watchPosition(p => {
@@ -140,37 +149,119 @@
       gps.textContent = 'Geolocation not supported';
     }
 
-    // --- Insert pin ---
-    drop.onclick = async () => {
+    // ===== Helpers =====
+    function getTrackIdFromUrl(url) {
+      try {
+        const u = new URL(url);
+        // cheap track id: filename without query
+        const parts = u.pathname.split('/');
+        return decodeURIComponent(parts[parts.length - 1] || 'unknown');
+      } catch { return 'unknown'; }
+    }
+
+    function show(result) {
+      out.textContent = typeof result === 'string'
+        ? result
+        : JSON.stringify(result, null, 2);
+    }
+
+    // ===== 1) ADMIN DROP (no login) — calls Netlify function =====
+    dropAdmin.onclick = async () => {
+      if (!latestPos) return alert('No GPS fix yet.');
+
+      const ADMIN_TOKEN =
+        localStorage.getItem('rc_admin_token') ||
+        prompt('Admin token (from Netlify env ADMIN_TOKEN):');
+      if (!ADMIN_TOKEN) return alert('No admin token provided.');
+      localStorage.setItem('rc_admin_token', ADMIN_TOKEN);
+
+      const t = (title.value || '').trim() || `Song @ ${new Date().toLocaleTimeString()}`;
+      const s = (song.value || '').trim();
+      const { latitude, longitude } = latestPos.coords;
+
+      dropAdmin.disabled = true;
+      try {
+        // This payload matches the example function I gave you.
+        // If your function inserts into `rc_pins`, update that function to accept these fields.
+        const payload = {
+          lat: latitude,
+          lng: longitude,
+          track_id: getTrackIdFromUrl(s),
+          note: t,
+          // Optional extras if your server chooses to store them:
+          title: t,
+          song_url: s,
+          is_active: true
+        };
+
+        const resp = await fetch('/.netlify/functions/drop-pin', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${ADMIN_TOKEN}`
+          },
+          body: JSON.stringify(payload)
+        });
+
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok) {
+          show({ error: data?.error || `HTTP ${resp.status}`, details: data });
+          alert('Admin drop failed.');
+        } else {
+          show({ ok: true, mode: 'admin', pin: data.pin || data });
+          alert('Pin dropped (admin) ✅');
+        }
+      } catch (e) {
+        console.error(e);
+        show({ error: e?.message || String(e) });
+        alert('Admin drop failed (network).');
+      } finally {
+        dropAdmin.disabled = false;
+      }
+    };
+
+    // ===== 2) CLIENT INSERT (needs login) — writes directly to Supabase =====
+    dropClient.onclick = async () => {
       const { data: { user } } = await sb.auth.getUser();
       if (!user) return alert('Sign in first (magic link).');
       if (!latestPos) return alert('No GPS fix yet.');
       if (user.id !== MASTER_UID && !confirm('You are not the MASTER user. Continue?')) return;
 
-      drop.disabled = true;
+      dropClient.disabled = true;
 
-      const t = title.value.trim() || `Song @ ${new Date().toLocaleTimeString()}`;
-      const s = song.value.trim() || 'https://recordcatcher.b-cdn.net/glb/NDE1%20record.glb';
+      const t = (title.value || '').trim() || `Song @ ${new Date().toLocaleTimeString()}`;
+      const s = (song.value || '').trim() || 'https://recordcatcher.b-cdn.net/glb/NDE1%20record.glb';
       const { latitude, longitude } = latestPos.coords;
 
-      const { data, error } = await sb
-        .from('rc_pins')
-        .insert({
-          title: t,
-          song_url: s,
-          lat: latitude,
-          lng: longitude,
-          is_active: true,
-          created_by: user.id
-        })
-        .select()
-        .single();
+      try {
+        // Adjust columns to match your rc_pins schema
+        const { data, error } = await sb
+          .from('rc_pins')
+          .insert({
+            title: t,
+            song_url: s,
+            lat: latitude,
+            lng: longitude,
+            is_active: true,
+            created_by: user.id
+          })
+          .select()
+          .single();
 
-      drop.disabled = false;
-
-      out.textContent = error
-        ? `Insert error: ${error.message}`
-        : `Inserted:\n${JSON.stringify(data, null, 2)}`;
+        if (error) {
+          show({ error: error.message });
+          alert('Client insert failed.');
+        } else {
+          show({ ok: true, mode: 'client', pin: data });
+          alert('Pin dropped (client) ✅');
+        }
+      } catch (e) {
+        console.error(e);
+        show({ error: e?.message || String(e) });
+        alert('Client insert failed (network).');
+      } finally {
+        dropClient.disabled = false;
+      }
     };
   </script>
 </body>
