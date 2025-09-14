@@ -25,7 +25,7 @@
   <div class="wrap">
     <h2>Drop Pin (Dev)</h2>
 
-    <!-- AUTH CARD (kept for client-side insert) -->
+    <!-- AUTH CARD -->
     <div class="card">
       <div class="row">
         <label>Email (magic link)</label>
@@ -48,15 +48,14 @@
       </div>
       <div class="row">
         <label>Song URL (GLB or viewer)</label>
-        <input id="song" value="https://recordcatcher.b-cdn.net/glb/NDE1%20record.glb" />
+        <!-- updated default -->
+        <input id="song" value="https://recordcatcher.b-cdn.net/glb/Recdemo.glb" />
       </div>
 
-      <!-- Buttons: admin (no login) and client (needs login) -->
+      <!-- Buttons -->
       <div style="display:grid;gap:8px;margin-top:8px">
         <button id="dropAdmin" class="ok">Admin Drop (No Login)</button>
         <button id="dropClient" class="gray">Client Insert (Needs Login)</button>
-
-        <!-- NEW: instant AR viewer jump (no auth, no DB) -->
         <button id="openHere" class="blue">Open Geo AR Here (No Auth)</button>
       </div>
 
@@ -73,10 +72,13 @@
     const SUPABASE_URL = 'https://rlejpxhkftihlkchklwub.supabase.co';
     const SUPABASE_ANON_KEY =
       'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJsZWpweGhrZnRpaGxjaGtsd3ViIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTcxMDUyMDIsImV4cCI6MjA3MjY4MTIwMn0.CBunws9Ge-zi858JS7LBen6fTYV_0fZ1__D2VdjTDtM';
-    const MASTER_UID = '2f545801-1368-418b-8533-aa3ee41806f2'; // optional
+    const MASTER_UID = '2f545801-1368-418b-8533-aa3ee41806f2';
     const CANONICAL_SELF = '/ar/pin.html';
 
-    // ===== Supabase client (for client insert + session only) =====
+    // Netlify absolute root (replace with your deploy domain)
+    const SITE_ROOT = 'https://YOUR_NETLIFY_DOMAIN.netlify.app';
+
+    // ===== Supabase client =====
     const { createClient } = supabase;
     const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
@@ -93,7 +95,7 @@
     const out = document.getElementById('out');
     const openHere = document.getElementById('openHere');
 
-    // ===== Auth status (client only) =====
+    // ===== Auth status =====
     async function refreshAuth() {
       const { data, error } = await sb.auth.getUser();
       if (error) { authStatus.textContent = 'Auth error: ' + error.message; return; }
@@ -105,49 +107,12 @@
     sb.auth.onAuthStateChange(() => refreshAuth());
     refreshAuth();
 
-    // ===== Send magic link (server-side function) =====
-    login.onclick = async () => {
-      const addr = (email.value || '').trim();
-      if (!addr) return alert('Enter email');
-
-      login.disabled = true;
-      const redirectTo = `${location.origin}/auth/callback?next=${encodeURIComponent(CANONICAL_SELF)}`;
-      try {
-        const res = await fetch('/.netlify/functions/send-otp', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email: addr, redirectTo })
-        });
-        const txt = await res.text();
-        if (!res.ok) {
-          console.error('send-otp error:', txt);
-          alert('Login error: ' + txt);
-        } else {
-          alert('Magic link sent. Open it in the SAME browser (Safari on iPhone).');
-        }
-      } catch (e) {
-        console.error('send-otp network error:', e);
-        alert('Login error (network): ' + (e?.message || e));
-      } finally {
-        login.disabled = false;
-      }
-    };
-
-    // ===== Logout (client only) =====
-    logoutBtn.onclick = async () => {
-      logoutBtn.disabled = true;
-      await sb.auth.signOut();
-      await refreshAuth();
-      logoutBtn.disabled = false;
-    };
-
     // ===== GPS watcher =====
     let latestPos = null;
     if (navigator.geolocation) {
       navigator.geolocation.watchPosition(p => {
         latestPos = p;
-        gps.textContent =
-          `${p.coords.latitude.toFixed(6)}, ${p.coords.longitude.toFixed(6)} (±${Math.round(p.coords.accuracy)}m)`;
+        gps.textContent = `${p.coords.latitude.toFixed(6)}, ${p.coords.longitude.toFixed(6)} (±${Math.round(p.coords.accuracy)}m)`;
       }, e => { gps.textContent = 'Error: ' + e.message; }, { enableHighAccuracy: true });
     } else {
       gps.textContent = 'Geolocation not supported';
@@ -167,10 +132,10 @@
         : JSON.stringify(result, null, 2);
     }
 
-    // ===== NEW: Open Geo AR Here (no auth / no DB) =====
+    // ===== Open Geo AR Here =====
     openHere.onclick = () => {
-      const model = encodeURIComponent((song.value || '').trim()
-        || 'https://recordcatcher.b-cdn.net/glb/NDE1%20record.glb');
+      const raw = (song.value || 'https://recordcatcher.b-cdn.net/glb/Recdemo.glb').trim();
+      const model = encodeURIComponent(raw + (raw.includes('?') ? '&' : '?') + 'v=' + Date.now());
 
       if (!navigator.geolocation) {
         alert('Geolocation not supported on this device/browser.');
@@ -184,7 +149,8 @@
           const lat = p.coords.latitude.toFixed(6);
           const lng = p.coords.longitude.toFixed(6);
           if (gps) gps.textContent = `${lat}, ${lng} (±${Math.round(p.coords.accuracy)}m)`;
-          location.href = `/ar/geo.html?lat=${lat}&lng=${lng}&model=${model}`;
+          // absolute URL instead of relative
+          location.href = `${SITE_ROOT}/ar/geo.html?lat=${lat}&lng=${lng}&model=${model}`;
           restore();
         },
         (err) => {
@@ -193,101 +159,6 @@
         },
         { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
       );
-    };
-
-    // ===== 1) ADMIN DROP (no login) — calls Netlify function =====
-    dropAdmin.onclick = async () => {
-      if (!latestPos) return alert('No GPS fix yet.');
-
-      const ADMIN_TOKEN =
-        localStorage.getItem('rc_admin_token') ||
-        prompt('Admin token (from Netlify env ADMIN_TOKEN):');
-      if (!ADMIN_TOKEN) return alert('No admin token provided.');
-      localStorage.setItem('rc_admin_token', ADMIN_TOKEN);
-
-      const t = (title.value || '').trim() || `Song @ ${new Date().toLocaleTimeString()}`;
-      const s = (song.value || '').trim();
-      const { latitude, longitude } = latestPos.coords;
-
-      dropAdmin.disabled = true;
-      try {
-        const payload = {
-          lat: latitude,
-          lng: longitude,
-          track_id: getTrackIdFromUrl(s),
-          note: t,
-          title: t,
-          song_url: s,
-          is_active: true
-        };
-
-        const resp = await fetch('/.netlify/functions/drop-pin', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${ADMIN_TOKEN}`
-          },
-          body: JSON.stringify(payload)
-        });
-
-        const data = await resp.json().catch(() => ({}));
-        if (!resp.ok) {
-          show({ error: data?.error || `HTTP ${resp.status}`, details: data });
-          alert('Admin drop failed.');
-        } else {
-          show({ ok: true, mode: 'admin', pin: data.pin || data });
-          alert('Pin dropped (admin) ✅');
-        }
-      } catch (e) {
-        console.error(e);
-        show({ error: e?.message || String(e) });
-        alert('Admin drop failed (network).');
-      } finally {
-        dropAdmin.disabled = false;
-      }
-    };
-
-    // ===== 2) CLIENT INSERT (needs login) — writes directly to Supabase =====
-    dropClient.onclick = async () => {
-      const { data: { user } } = await sb.auth.getUser();
-      if (!user) return alert('Sign in first (magic link).');
-      if (!latestPos) return alert('No GPS fix yet.');
-      if (user.id !== MASTER_UID && !confirm('You are not the MASTER user. Continue?')) return;
-
-      dropClient.disabled = true;
-
-      const t = (title.value || '').trim() || `Song @ ${new Date().toLocaleTimeString()}`;
-      const s = (song.value || '').trim() || 'https://recordcatcher.b-cdn.net/glb/NDE1%20record.glb';
-      const { latitude, longitude } = latestPos.coords;
-
-      try {
-        const { data, error } = await sb
-          .from('rc_pins')
-          .insert({
-            title: t,
-            song_url: s,
-            lat: latitude,
-            lng: longitude,
-            is_active: true,
-            created_by: user.id
-          })
-          .select()
-          .single();
-
-        if (error) {
-          show({ error: error.message });
-          alert('Client insert failed.');
-        } else {
-          show({ ok: true, mode: 'client', pin: data });
-          alert('Pin dropped (client) ✅');
-        }
-      } catch (e) {
-        console.error(e);
-        show({ error: e?.message || String(e) });
-        alert('Client insert failed (network).');
-      } finally {
-        dropClient.disabled = false;
-      }
     };
   </script>
 </body>
