@@ -2,27 +2,22 @@
 <html lang="en">
 <head>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>Geo AR — Drop-in Viewer</title>
+  <title>Geo AR — Drop-in Viewer (Debug)</title>
 
-  <!-- A-Frame + AR.js (stable combo) -->
+  <!-- A-Frame + AR.js -->
   <script src="https://aframe.io/releases/1.2.0/aframe.min.js"></script>
   <script src="https://raw.githack.com/AR-js-org/AR.js/3.3.3/aframe/build/aframe-ar-nft.js"></script>
 
   <style>
     html, body { margin:0; height:100%; overflow:hidden; background:#000; }
-    #hud {
-      position:fixed; top:10px; left:50%; transform:translateX(-50%);
+    #hud { position:fixed; top:10px; left:50%; transform:translateX(-50%);
       background:rgba(0,0,0,.6); color:#fff; font:14px system-ui;
-      padding:8px 12px; border-radius:10px; z-index:10; text-align:center;
-    }
-    #hud small { opacity:.8; }
+      padding:8px 12px; border-radius:10px; z-index:10; text-align:center; }
+    #hud small { opacity:.8; display:block; }
     #btns { margin-top:6px; display:flex; gap:6px; justify-content:center; flex-wrap:wrap; }
     button { padding:6px 10px; border:0; border-radius:8px; font-weight:700; cursor:pointer; }
-    #motionGate {
-      position:fixed; inset:0; display:none; place-items:center; z-index:9999;
-      background:rgba(0,0,0,.85); color:#fff; text-align:center; padding:24px;
-      font:16px system-ui;
-    }
+    #motionGate { position:fixed; inset:0; display:none; place-items:center; z-index:9999;
+      background:rgba(0,0,0,.85); color:#fff; text-align:center; padding:24px; font:16px system-ui; }
     #motionGate button { margin-top:12px; }
   </style>
 </head>
@@ -42,7 +37,6 @@
     <div id="btns">
       <button id="bigger">Scale +</button>
       <button id="smaller">Scale −</button>
-      <button id="spin">Spin</button>
       <button id="reset">Reset</button>
     </div>
   </div>
@@ -53,35 +47,41 @@
     embedded
     arjs="sourceType: webcam; videoTexture: true; debugUIEnabled: false; trackingMethod: best;">
 
-    <!-- AR.js GPS camera (no rotation-reader) -->
+    <!-- GPS camera -->
     <a-camera gps-camera></a-camera>
 
-    <!-- Our model -->
+    <!-- Fallback marker (colored box at the same GPS) -->
+    <a-box id="marker"
+      gps-entity-place="latitude:0; longitude:0;"
+      depth="1" height="1" width="1"
+      color="#39ff14" opacity="0.5" visible="false">
+    </a-box>
+
+    <!-- The GLB model -->
     <a-entity id="model"
       gltf-model=""
       crossorigin="anonymous"
       gps-entity-place="latitude:0; longitude:0;"
-      scale="1 1 1"
+      scale="8 8 8"
       rotation="0 0 0"
-      animation__spin="property: rotation; to: 0 360 0; loop: true; dur: 8000; autoplay: false">
+      animation__spin="property: rotation; to: 0 360 0; loop: true; dur: 8000; autoplay: true">
     </a-entity>
   </a-scene>
 
   <script>
-    // --- Utils ---
     const $ = sel => document.querySelector(sel);
     const params = new URLSearchParams(location.search);
     const toNum = v => (v==null ? NaN : Number(v));
 
-    // Required URL params
     const lat = toNum(params.get('lat'));
     const lng = toNum(params.get('lng'));
     const modelUrl = params.get('model') ||
-      'https://recordcatcher.b-cdn.net/glb/NDE1%20record.glb'; // default
+      'https://recordcatcher.b-cdn.net/glb/NDE1%20record.glb';
 
     const statusEl = $('#status');
     const coordsEl = $('#coords');
     const modelEl = $('#model');
+    const markerEl = $('#marker');
 
     // Validate
     if (isNaN(lat) || isNaN(lng)) {
@@ -90,68 +90,67 @@
       coordsEl.textContent = `lat: ${lat.toFixed(6)}, lng: ${lng.toFixed(6)}`;
     }
 
-    // Apply model + position
+    // Place model + marker
     modelEl.setAttribute('gltf-model', modelUrl);
     modelEl.setAttribute('gps-entity-place', `latitude: ${lat}; longitude: ${lng};`);
+    markerEl.setAttribute('gps-entity-place', `latitude: ${lat}; longitude: ${lng};`);
+
+    // Model load diagnostics
+    modelEl.addEventListener('model-loaded', () => {
+      statusEl.textContent = 'Model loaded. Walk toward the target point.';
+      markerEl.setAttribute('visible', false);
+    });
+    modelEl.addEventListener('model-error', (e) => {
+      statusEl.textContent = 'Model failed to load. Showing marker.';
+      markerEl.setAttribute('visible', true);
+      console.log('model-error', e.detail);
+    });
+
+    // GPS status
+    window.addEventListener('gps-camera-origin-coord-set', () => {
+      statusEl.textContent = 'Origin set. Rendering at target.';
+    });
+    window.addEventListener('gps-camera-update-position', () => {
+      // Keep brief; too much text flashes
+    });
 
     // Controls
-    let baseScale = 1;
+    let baseScale = 8;
     $('#bigger').onclick = () => {
       baseScale *= 1.25;
       modelEl.setAttribute('scale', `${baseScale} ${baseScale} ${baseScale}`);
+      markerEl.setAttribute('scale', `${baseScale/4} ${baseScale/4} ${baseScale/4}`);
     };
     $('#smaller').onclick = () => {
-      baseScale = Math.max(0.1, baseScale / 1.25);
+      baseScale = Math.max(0.5, baseScale / 1.25);
       modelEl.setAttribute('scale', `${baseScale} ${baseScale} ${baseScale}`);
-    };
-    let spinning = false;
-    $('#spin').onclick = () => {
-      spinning = !spinning;
-      modelEl.setAttribute('animation__spin',
-        `property: rotation; to: 0 360 0; loop: true; dur: 8000; autoplay: ${spinning}`);
+      markerEl.setAttribute('scale', `${baseScale/4} ${baseScale/4} ${baseScale/4}`);
     };
     $('#reset').onclick = () => {
-      baseScale = 1;
-      spinning = false;
-      modelEl.setAttribute('scale', '1 1 1');
+      baseScale = 8;
+      modelEl.setAttribute('scale', '8 8 8');
       modelEl.setAttribute('rotation', '0 0 0');
-      modelEl.setAttribute('animation__spin',
-        'property: rotation; to: 0 360 0; loop: true; dur: 8000; autoplay: false');
     };
 
-    // Helpful status
-    window.addEventListener('gps-camera-update-position', () => {
-      statusEl.textContent = 'GPS locked. Walk toward the target point.';
-    });
-    window.addEventListener('gps-camera-origin-coord-set', () => {
-      statusEl.textContent = 'Origin set. Rendering model at target.';
-    });
-
-    // iOS motion permission flow
-    document.addEventListener('DOMContentLoaded', async () => {
+    // iOS motion permission
+    document.addEventListener('DOMContentLoaded', () => {
       statusEl.textContent = 'Allow camera, motion & location. If blank, reload and move phone.';
-
       const gate = document.getElementById('motionGate');
       const btn = document.getElementById('enableMotion');
-
       const needsIOSPermission =
         typeof DeviceMotionEvent !== 'undefined' &&
         typeof DeviceMotionEvent.requestPermission === 'function';
-
       if (needsIOSPermission) {
         gate.style.display = 'grid';
         btn.onclick = async () => {
           try {
             const res = await DeviceMotionEvent.requestPermission();
-            // Some iOS versions also require orientation:
             if (typeof DeviceOrientationEvent !== 'undefined' &&
                 typeof DeviceOrientationEvent.requestPermission === 'function') {
               try { await DeviceOrientationEvent.requestPermission(); } catch (_) {}
             }
             if (res === 'granted') gate.style.display = 'none';
-          } catch (e) {
-            console.warn('Motion permission error:', e);
-          }
+          } catch (e) { console.warn('Motion permission error:', e); }
         };
       }
     });
