@@ -1,87 +1,95 @@
 <!doctype html>
 <html>
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Universal GLB Viewer</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Flux — Try AR</title>
+  <script type="module" src="https://cdn.jsdelivr.net/npm/@google/model-viewer/dist/model-viewer.min.js"></script>
   <style>
-    html,body{margin:0;height:100%;background:#000;color:#fff}
-    #c{width:100%;height:100%;display:block}
-    #hud{position:fixed;left:0;right:0;top:0;padding:8px 12px;
-         font:13px system-ui;background:rgba(0,0,0,.6)}
+    html,body{margin:0;height:100%;background:#111;display:grid;place-items:center}
+    .wrap{width:100vw;max-width:640px;display:grid;gap:14px;justify-items:center}
+    model-viewer{width:100%;height:70vh;background:#000; border-radius:12px}
+
+    /* Custom ALWAYS-visible red oval button */
+    #launch-ar{
+      font:700 16px system-ui;
+      padding:14px 28px;
+      border-radius:999px;
+      background:#ff3b30;
+      color:#fff;
+      border:none;
+      box-shadow:0 10px 24px rgba(0,0,0,.35);
+      cursor:pointer;
+      transition:transform .08s ease, opacity .2s ease;
+    }
+    #launch-ar:hover{transform:translateY(-1px)}
+    #launch-ar:active{transform:translateY(0)}
+    #launch-ar[disabled]{
+      opacity:.45;
+      cursor:not-allowed;
+      box-shadow:none;
+    }
+
+    /* Optional helper text */
+    .hint{color:#aaa;font:500 12px/1.4 system-ui;text-align:center;opacity:.9}
   </style>
 </head>
 <body>
-<canvas id="c"></canvas>
-<div id="hud">Boot…</div>
-<script type="module">
-import * as THREE from 'https://unpkg.com/three@0.161.0/build/three.module.js';
-import {OrbitControls} from 'https://unpkg.com/three@0.161.0/examples/jsm/controls/OrbitControls.js';
-import {GLTFLoader} from 'https://unpkg.com/three@0.161.0/examples/jsm/loaders/GLTFLoader.js';
-import {DRACOLoader} from 'https://unpkg.com/three@0.161.0/examples/jsm/loaders/DRACOLoader.js';
-import {KTX2Loader} from 'https://unpkg.com/three@0.161.0/examples/jsm/loaders/KTX2Loader.js';
-import {MeshoptDecoder} from 'https://unpkg.com/meshoptimizer/meshopt_decoder.module.js';
+  <div class="wrap">
+    <!-- “Box” you can spin/zoom with finger/mouse -->
+    <model-viewer id="mv"
+      src="https://scanpacks.b-cdn.net/Flux/Surface%202/Flux.glb?v=1"
+      ios-src="https://scanpacks.b-cdn.net/Flux/Surface%202/Flux.usdz#callToAction=Own%20Yours&checkoutURL=https%3A%2F%2Fwww.neondoorway.com%2Fflashar"
+      ar ar-modes="scene-viewer quick-look webxr"
+      ar-scale="fixed" ar-placement="floor"
+      camera-controls interaction-prompt="auto"
+      auto-rotate
+      shadow-intensity="1" environment-image="neutral">
+    </model-viewer>
 
-const hud = document.getElementById('hud');
-const url = prompt('Paste GLB/GLTF URL', 'https://recordcatcher.b-cdn.net/glb/Recdemo.glb?v=' + Date.now());
-if(!url){ hud.textContent = 'No URL provided.'; throw new Error('no url'); }
+    <button id="launch-ar">Place in AR</button>
+    <div class="hint" id="ar-hint"></div>
+  </div>
 
-const renderer = new THREE.WebGLRenderer({canvas: c, antialias:true});
-renderer.setPixelRatio(devicePixelRatio); renderer.setSize(innerWidth, innerHeight);
-renderer.outputColorSpace = THREE.SRGBColorSpace;
+  <script>
+    const mv = document.getElementById('mv');
+    const btn = document.getElementById('launch-ar');
+    const hint = document.getElementById('ar-hint');
 
-const scene = new THREE.Scene(); scene.background = new THREE.Color(0x000000);
-const camera = new THREE.PerspectiveCamera(60, innerWidth/innerHeight, 0.01, 1000);
-camera.position.set(0, 1.5, 3);
-new OrbitControls(camera, renderer.domElement);
+    // Helper: update button/hint based on AR support
+    function refreshARState(){
+      // model-viewer exposes canActivateAR (boolean)
+      const supported = mv.canActivateAR;
+      if(supported){
+        btn.disabled = false;
+        hint.textContent = 'Tip: Pinch to zoom & drag to spin before placing.';
+      } else {
+        btn.disabled = true;
+        // Basic platform-specific hint
+        const ua = navigator.userAgent;
+        if (/iPhone|iPad|iPod/.test(ua)) {
+          hint.textContent = 'AR requires Safari + iOS 12+ with Quick Look.';
+        } else if (/Android/.test(ua)) {
+          hint.textContent = 'AR requires Chrome + ARCore (Scene Viewer).';
+        } else {
+          hint.textContent = 'AR not available on this device. Try on your phone.';
+        }
+      }
+    }
 
-scene.add(new THREE.HemisphereLight(0xffffff, 0x222233, 1.0));
-const dir = new THREE.DirectionalLight(0xffffff, 1.0); dir.position.set(2,3,2); scene.add(dir);
+    // Launch AR when tapped
+    btn.addEventListener('click', async () => {
+      try {
+        await mv.activateAR();
+      } catch(e){
+        console.warn('AR launch error:', e);
+      }
+    });
 
-const loader = new GLTFLoader();
-
-// DRACO
-const draco = new DRACOLoader();
-draco.setDecoderPath('https://www.gstatic.com/draco/v1/decoders/');
-loader.setDRACOLoader(draco);
-
-// KTX2 (BasisU)
-const ktx2 = new KTX2Loader().setTranscoderPath('https://storage.googleapis.com/gltf-tmp/');
-ktx2.detectSupport(renderer);
-loader.setKTX2Loader(ktx2);
-
-// Meshopt
-loader.setMeshoptDecoder(MeshoptDecoder);
-
-hud.textContent = 'Fetching…';
-loader.load(url,
-  (gltf) => {
-    hud.textContent = 'Loaded ✅';
-    const root = gltf.scene;
-    scene.add(root);
-
-    // Frame model
-    const box = new THREE.Box3().setFromObject(root);
-    const size = box.getSize(new THREE.Vector3()).length();
-    const center = box.getCenter(new THREE.Vector3());
-    root.position.sub(center);
-    camera.position.set(0, size*0.5, size*1.2);
-    camera.lookAt(0,0,0);
-
-    animate();
-  },
-  (xhr) => {
-    const pct = xhr.total ? (xhr.loaded/xhr.total*100).toFixed(1) : ((xhr.loaded/1024)|0) + 'KB';
-    hud.textContent = 'Loading… ' + pct;
-  },
-  (err) => {
-    console.error('GLB load error:', err);
-    hud.textContent = '❌ Load error. See console.';
-  }
-);
-
-function animate(){ requestAnimationFrame(animate); renderer.render(scene, camera); }
-addEventListener('resize', ()=>{ camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
-</script>
+    // Re-check when model loads and when AR status changes
+    mv.addEventListener('load', refreshARState);
+    mv.addEventListener('ar-status', refreshARState);
+    // Initial pass
+    refreshARState();
+  </script>
 </body>
 </html>
