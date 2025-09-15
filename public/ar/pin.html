@@ -47,9 +47,9 @@
         <input id="title" placeholder="e.g. Park — 85th Street" />
       </div>
       <div class="row">
-        <label>Song URL (GLB or viewer)</label>
+        <label>Model URL (GLB or viewer)</label> <!-- CHANGED -->
         <!-- updated default -->
-        <input id="song" value="https://recordcatcher.b-cdn.net/glb/Recdemo.glb" />
+        <input id="song" value="https://recordcatcher.b-cdn.net/glb/Nderec.glb" /> <!-- CHANGED -->
       </div>
 
       <!-- Buttons -->
@@ -76,7 +76,7 @@
     const CANONICAL_SELF = '/ar/pin.html';
 
     // Netlify absolute root (replace with your deploy domain)
-    const SITE_ROOT = 'https://YOUR_NETLIFY_DOMAIN.netlify.app';
+    // const SITE_ROOT = 'https://YOUR_NETLIFY_DOMAIN.netlify.app'; // NOT NEEDED NOW
 
     // ===== Supabase client =====
     const { createClient } = supabase;
@@ -119,13 +119,6 @@
     }
 
     // ===== Helpers =====
-    function getTrackIdFromUrl(url) {
-      try {
-        const u = new URL(url);
-        const parts = u.pathname.split('/');
-        return decodeURIComponent(parts[parts.length - 1] || 'unknown');
-      } catch { return 'unknown'; }
-    }
     function show(result) {
       out.textContent = typeof result === 'string'
         ? result
@@ -134,8 +127,12 @@
 
     // ===== Open Geo AR Here =====
     openHere.onclick = () => {
-      const raw = (song.value || 'https://recordcatcher.b-cdn.net/glb/Recdemo.glb').trim();
-      const model = encodeURIComponent(raw + (raw.includes('?') ? '&' : '?') + 'v=' + Date.now());
+      const rawDefault = 'https://recordcatcher.b-cdn.net/glb/Nderec.glb'; // CHANGED
+      const raw = (song.value || rawDefault).trim();
+
+      // add/merge cache-buster BEFORE encoding
+      const withBust = raw + (raw.includes('?') ? '&' : '?') + 'v=' + Date.now();
+      const model = encodeURIComponent(withBust);
 
       if (!navigator.geolocation) {
         alert('Geolocation not supported on this device/browser.');
@@ -149,8 +146,10 @@
           const lat = p.coords.latitude.toFixed(6);
           const lng = p.coords.longitude.toFixed(6);
           if (gps) gps.textContent = `${lat}, ${lng} (±${Math.round(p.coords.accuracy)}m)`;
-          // absolute URL instead of relative
-          location.href = `${SITE_ROOT}/ar/geo.html?lat=${lat}&lng=${lng}&model=${model}`;
+
+          // Robust absolute URL to ./geo.html (no SITE_ROOT needed)
+          const geoURL = new URL('./geo.html', location.href).href; // CHANGED
+          location.href = `${geoURL}?lat=${lat}&lng=${lng}&model=${model}`;
           restore();
         },
         (err) => {

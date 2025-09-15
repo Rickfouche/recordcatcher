@@ -73,12 +73,14 @@
 
     const lat = toNum(params.get('lat'));
     const lng = toNum(params.get('lng'));
+
+    // NEW DEFAULT GLB
     const modelUrl = params.get('model') ||
-      'https://recordcatcher.b-cdn.net/glb/Recdemo.glb';
+      'https://recordcatcher.b-cdn.net/glb/Nderec.glb';
 
     const statusEl = $('#status');
     const coordsEl = $('#coords');
-    const modelEl = $('#model');
+    const modelEl  = $('#model');
     const markerEl = $('#marker');
 
     // Validate
@@ -89,8 +91,10 @@
     }
 
     // Set model + place it
-    modelEl.setAttribute('gltf-model',
-      `src: ${modelUrl}; dracoDecoderPath: https://www.gstatic.com/draco/v1/decoders/; ktx2TranscoderPath: https://storage.googleapis.com/gltf-tmp/;`);
+    modelEl.setAttribute(
+      'gltf-model',
+      `src: ${modelUrl}; dracoDecoderPath: https://www.gstatic.com/draco/v1/decoders/; ktx2TranscoderPath: https://storage.googleapis.com/gltf-tmp/;`
+    );
     modelEl.setAttribute('gps-entity-place', `latitude: ${lat}; longitude: ${lng};`);
     markerEl.setAttribute('gps-entity-place', `latitude: ${lat}; longitude: ${lng};`);
 
@@ -146,7 +150,8 @@
               try { await DeviceOrientationEvent.requestPermission(); } catch (_) {}
             }
             if (res === 'granted') gate.style.display = 'none';
-          } catch (e) { console.warn('Motion permission error:', e);
+          } catch (e) {
+            console.warn('Motion permission error:', e);
           }
         };
       }
