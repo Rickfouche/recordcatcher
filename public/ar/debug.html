@@ -4,31 +4,38 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>GLB Debug</title>
   <script src="https://aframe.io/releases/1.2.0/aframe.min.js"></script>
-  <style>html,body{margin:0;height:100%;background:#000}</style>
+  <style>
+    html,body{margin:0;height:100%;background:#000}
+    #msg{position:fixed;left:0;right:0;top:0;padding:10px;
+         font:14px system-ui;color:#fff;background:rgba(0,0,0,.6);text-align:center}
+  </style>
 </head>
 <body>
+<div id="msg">Loading…</div>
+
 <a-scene renderer="antialias:true;alpha:true" vr-mode-ui="enabled:false">
   <a-assets>
-    <a-asset-item id="rec"
-      src="https://recordcatcher.b-cdn.net/glb/Recdemo.glb?v=<?js=Math.random()?>"
-      response-type="arraybuffer" crossorigin="anonymous"></a-asset-item>
+    <a-asset-item id="rec" response-type="arraybuffer" crossorigin="anonymous"></a-asset-item>
   </a-assets>
 
-  <a-entity position="0 1.4 -1.8"
+  <a-entity id="mesh"
+            position="0 1.4 -1.8"
             rotation="0 0 0"
             scale="8 8 8"
-            gltf-model="src: #rec; dracoDecoderPath: https://www.gstatic.com/draco/v1/decoders/; ktx2TranscoderPath: https://storage.googleapis.com/gltf-tmp/;">
+            gltf-model="dracoDecoderPath: https://www.gstatic.com/draco/v1/decoders/;
+                        ktx2TranscoderPath: https://storage.googleapis.com/gltf-tmp/;">
   </a-entity>
 
   <a-entity light="type:directional;intensity:1" position="1 3 2"></a-entity>
-  <a-entity light="type:ambient;intensity:.6"></a-entity>
-  <a-sky color="#000"></a-sky>
+  <a-entity light="type:ambient;intensity:.65"></a-entity>
 </a-scene>
 
 <script>
-  const m = document.querySelector('[gltf-model]');
-  m.addEventListener('model-loaded', e => console.log('OK model-loaded', e));
-  m.addEventListener('model-error', e => console.warn('MODEL ERROR', e.detail));
-</script>
-</body>
-</html>
+  const url = "https://recordcatcher.b-cdn.net/glb/Recdemo.glb?v=" + Date.now();
+  const asset = document.querySelector('#rec');
+  asset.setAttribute('src', url);
+
+  const mesh = document.querySelector('#mesh');
+  mesh.setAttribute('gltf-model', `src: #rec; dracoDecoderPath: https://www.gstatic.com/draco/v1/decoders/; ktx2TranscoderPath: https://storage.googleapis.com/gltf-tmp/;`);
+
+  const msg = document.getElementById
