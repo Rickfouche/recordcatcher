@@ -1,23 +1,29 @@
 <!doctype html>
 <html>
 <head>
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Record — GLB Test</title>
-    <script type="module" src="https://cdn.jsdelivr.net/npm/@google/model-viewer/dist/model-viewer.min.js"></script>
-    <style>
-        html,body {margin:0;height:100%;background:#111;display:grid;place-items:center}
-        model-viewer {width:100%;height:100%;background:#000}
-    </style>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Record — GLB Test</title>
+  <script type="module" src="https://cdn.jsdelivr.net/npm/@google/model-viewer/dist/model-viewer.min.js"></script>
+  <style>
+    html,body {margin:0;height:100%;background:#111;display:grid;place-items:center}
+    model-viewer {width:100%;height:100%;background:#000}
+  </style>
 </head>
 <body>
-    <model-viewer
-        src="https://scanpacks.b-cdn.net/Flux/Surface%202/Flux.glb"
-        camera-controls
-        auto-rotate
-        ar
-        ar-modes="webxr scene-viewer"
-        shadow-intensity="1"
-        environment-image="neutral">
-    </model-viewer>
+  <model-viewer id="mv"
+    src="https://recordcatcher.b-cdn.net/glb/Recdemo.glb"
+    camera-controls
+    auto-rotate
+    ar
+    ar-modes="webxr scene-viewer"
+    shadow-intensity="1"
+    environment-image="neutral">
+  </model-viewer>
+  <script>
+    const mv = document.getElementById('mv');
+    // These listeners help ensure the component is initialized correctly
+    mv.addEventListener('load', () => console.log('Model loaded.'));
+    mv.addEventListener('ar-status', () => console.log('AR status changed.'));
+  </script>
 </body>
 </html>
