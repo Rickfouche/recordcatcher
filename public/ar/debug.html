@@ -2,40 +2,66 @@
 <html>
 <head>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>GLB Debug</title>
+  <title>GLB Debug (hard)</title>
   <script src="https://aframe.io/releases/1.2.0/aframe.min.js"></script>
   <style>
     html,body{margin:0;height:100%;background:#000}
-    #msg{position:fixed;left:0;right:0;top:0;padding:10px;
-         font:14px system-ui;color:#fff;background:rgba(0,0,0,.6);text-align:center}
+    #msg{position:fixed;inset:0 auto auto 0;right:0;padding:10px;
+         font:13px system-ui;line-height:1.35;color:#fff;background:rgba(0,0,0,.6)}
+    #msg b{color:#39ff14}
   </style>
 </head>
 <body>
-<div id="msg">Loading…</div>
+<div id="msg">Boot…</div>
 
 <a-scene renderer="antialias:true;alpha:true" vr-mode-ui="enabled:false">
   <a-assets>
-    <a-asset-item id="rec" response-type="arraybuffer" crossorigin="anonymous"></a-asset-item>
+    <a-asset-item id="asset" response-type="arraybuffer" crossorigin="anonymous"></a-asset-item>
   </a-assets>
 
   <a-entity id="mesh"
             position="0 1.4 -1.8"
-            rotation="0 0 0"
             scale="8 8 8"
             gltf-model="dracoDecoderPath: https://www.gstatic.com/draco/v1/decoders/;
                         ktx2TranscoderPath: https://storage.googleapis.com/gltf-tmp/;">
   </a-entity>
 
-  <a-entity light="type:directional;intensity:1" position="1 3 2"></a-entity>
-  <a-entity light="type:ambient;intensity:.65"></a-entity>
+  <a-entity light="type:directional;intensity:1.1" position="1 3 2"></a-entity>
+  <a-entity light="type:ambient;intensity:.6"></a-entity>
 </a-scene>
 
 <script>
+(async () => {
+  const msg = document.getElementById('msg');
   const url = "https://recordcatcher.b-cdn.net/glb/Recdemo.glb?v=" + Date.now();
-  const asset = document.querySelector('#rec');
-  asset.setAttribute('src', url);
+  msg.innerHTML = `<b>Fetching</b> ${url}`;
 
+  // 1) Prefetch to see HTTP status/headers
+  let res;
+  try {
+    res = await fetch(url, { mode: 'cors' });
+  } catch (e) {
+    msg.textContent = '❌ Network error: ' + (e.message || e);
+    return;
+  }
+  const ct = res.headers.get('content-type');
+  const len = Number(res.headers.get('content-length') || 0);
+  if (!res.ok) {
+    msg.textContent = `❌ HTTP ${res.status} ${res.statusText} — content-type=${ct}`;
+    return;
+  }
+  if (ct && !/model\/gltf-binary|octet-stream/i.test(ct)) {
+    msg.textContent = `⚠️ Unusual content-type: ${ct} (should be model/gltf-binary or octet-stream)`;
+  } else {
+    msg.textContent = `✅ Fetched (${len ? (len/1024).toFixed(1)+' KB' : 'size unknown'}) — parsing…`;
+  }
+
+  // 2) Hand to A-Frame via object URL
+  const buf = await res.arrayBuffer();
+  const blob = new Blob([buf], { type: 'model/gltf-binary' });
+  const objectUrl = URL.createObjectURL(blob);
+
+  const asset = document.querySelector('#asset');
   const mesh = document.querySelector('#mesh');
-  mesh.setAttribute('gltf-model', `src: #rec; dracoDecoderPath: https://www.gstatic.com/draco/v1/decoders/; ktx2TranscoderPath: https://storage.googleapis.com/gltf-tmp/;`);
 
-  const msg = document.getElementById
+  // Watchdog: if parse
