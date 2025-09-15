@@ -2,94 +2,22 @@
 <html>
 <head>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Flux — Try AR</title>
+  <title>Record — GLB Test</title>
   <script type="module" src="https://cdn.jsdelivr.net/npm/@google/model-viewer/dist/model-viewer.min.js"></script>
   <style>
-    html,body{margin:0;height:100%;background:#111;display:grid;place-items:center}
-    .wrap{width:100vw;max-width:640px;display:grid;gap:14px;justify-items:center}
-    model-viewer{width:100%;height:70vh;background:#000; border-radius:12px}
-
-    /* Custom ALWAYS-visible red oval button */
-    #launch-ar{
-      font:700 16px system-ui;
-      padding:14px 28px;
-      border-radius:999px;
-      background:#ff3b30;
-      color:#fff;
-      border:none;
-      box-shadow:0 10px 24px rgba(0,0,0,.35);
-      cursor:pointer;
-      transition:transform .08s ease, opacity .2s ease;
-    }
-    #launch-ar:hover{transform:translateY(-1px)}
-    #launch-ar:active{transform:translateY(0)}
-    #launch-ar[disabled]{
-      opacity:.45;
-      cursor:not-allowed;
-      box-shadow:none;
-    }
-
-    /* Optional helper text */
-    .hint{color:#aaa;font:500 12px/1.4 system-ui;text-align:center;opacity:.9}
+    html,body {margin:0;height:100%;background:#111;display:grid;place-items:center}
+    model-viewer {width:100%;height:100%;background:#000}
   </style>
 </head>
 <body>
-  <div class="wrap">
-    <!-- “Box” you can spin/zoom with finger/mouse -->
-    <model-viewer id="mv"
-      src="https://scanpacks.b-cdn.net/Flux/Surface%202/Flux.glb?v=1"
-      ios-src="https://scanpacks.b-cdn.net/Flux/Surface%202/Flux.usdz#callToAction=Own%20Yours&checkoutURL=https%3A%2F%2Fwww.neondoorway.com%2Fflashar"
-      ar ar-modes="scene-viewer quick-look webxr"
-      ar-scale="fixed" ar-placement="floor"
-      camera-controls interaction-prompt="auto"
-      auto-rotate
-      shadow-intensity="1" environment-image="neutral">
-    </model-viewer>
-
-    <button id="launch-ar">Place in AR</button>
-    <div class="hint" id="ar-hint"></div>
-  </div>
-
-  <script>
-    const mv = document.getElementById('mv');
-    const btn = document.getElementById('launch-ar');
-    const hint = document.getElementById('ar-hint');
-
-    // Helper: update button/hint based on AR support
-    function refreshARState(){
-      // model-viewer exposes canActivateAR (boolean)
-      const supported = mv.canActivateAR;
-      if(supported){
-        btn.disabled = false;
-        hint.textContent = 'Tip: Pinch to zoom & drag to spin before placing.';
-      } else {
-        btn.disabled = true;
-        // Basic platform-specific hint
-        const ua = navigator.userAgent;
-        if (/iPhone|iPad|iPod/.test(ua)) {
-          hint.textContent = 'AR requires Safari + iOS 12+ with Quick Look.';
-        } else if (/Android/.test(ua)) {
-          hint.textContent = 'AR requires Chrome + ARCore (Scene Viewer).';
-        } else {
-          hint.textContent = 'AR not available on this device. Try on your phone.';
-        }
-      }
-    }
-
-    // Launch AR when tapped
-    btn.addEventListener('click', async () => {
-      try {
-        await mv.activateAR();
-      } catch(e){
-        console.warn('AR launch error:', e);
-      }
-    });
-
-    // Re-check when model loads and when AR status changes
-    mv.addEventListener('load', refreshARState);
-    mv.addEventListener('ar-status', refreshARState);
-    // Initial pass
-    refreshARState();
-  </script>
+  <model-viewer
+    src="https://scanpacks.b-cdn.net/Flux/Surface%202/Flux.glb?v=1"
+    camera-controls
+    auto-rotate
+    ar
+    ar-modes="webxr scene-viewer"
+    shadow-intensity="1"
+    environment-image="neutral">
+  </model-viewer>
 </body>
 </html>
