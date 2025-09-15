@@ -1,193 +1,87 @@
 <!doctype html>
-<html lang="en">
-  <head>
-    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>ChromeChe AR</title>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Universal GLB Viewer</title>
+  <style>
+    html,body{margin:0;height:100%;background:#000;color:#fff}
+    #c{width:100%;height:100%;display:block}
+    #hud{position:fixed;left:0;right:0;top:0;padding:8px 12px;
+         font:13px system-ui;background:rgba(0,0,0,.6)}
+  </style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hud">Boot…</div>
+<script type="module">
+import * as THREE from 'https://unpkg.com/three@0.161.0/build/three.module.js';
+import {OrbitControls} from 'https://unpkg.com/three@0.161.0/examples/jsm/controls/OrbitControls.js';
+import {GLTFLoader} from 'https://unpkg.com/three@0.161.0/examples/jsm/loaders/GLTFLoader.js';
+import {DRACOLoader} from 'https://unpkg.com/three@0.161.0/examples/jsm/loaders/DRACOLoader.js';
+import {KTX2Loader} from 'https://unpkg.com/three@0.161.0/examples/jsm/loaders/KTX2Loader.js';
+import {MeshoptDecoder} from 'https://unpkg.com/meshoptimizer/meshopt_decoder.module.js';
 
-    <!-- A-Frame + MindAR (your versions) -->
-    <script src="https://aframe.io/releases/1.6.0/aframe.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-aframe.prod.js"></script>
+const hud = document.getElementById('hud');
+const url = prompt('Paste GLB/GLTF URL', 'https://recordcatcher.b-cdn.net/glb/Recdemo.glb?v=' + Date.now());
+if(!url){ hud.textContent = 'No URL provided.'; throw new Error('no url'); }
 
-    <style>
-      html, body { margin: 0; height: 100%; background: #fff; }
-      .ar-scene-container { width: 100vw; height: 100vh; position: relative; overflow: hidden; }
-      #tap-catcher { position: fixed; inset: 0; z-index: 999; display: none; }
-      #loader {
-        position: fixed; inset: 0; background: #fff; display: flex; flex-direction: column;
-        justify-content: center; align-items: center; z-index: 9999; transition: opacity .5s ease;
-      }
-      #nd-logo { width: 220px; opacity: 0; animation: fadeInLogo 1s ease-out forwards, glow 3s ease-in-out 1.2s infinite, float 4s ease-in-out 1.2s infinite; }
-      .powered-by { color: #000; font: 15px/1.3 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; opacity: 0; margin-top: 12px; animation: fadeInText 1s ease-out forwards; animation-delay: 1.2s; }
-      @keyframes fadeInLogo { to { opacity: 1; } }
-      @keyframes fadeInText { to { opacity: 1; } }
-      @keyframes glow { 0%,100% { filter: drop-shadow(0 0 8px rgba(0,255,255,.25)); } 50% { filter: drop-shadow(0 0 12px rgba(0,255,255,.6)); } }
-      @keyframes float { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
-    </style>
-  </head>
+const renderer = new THREE.WebGLRenderer({canvas: c, antialias:true});
+renderer.setPixelRatio(devicePixelRatio); renderer.setSize(innerWidth, innerHeight);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
 
-  <body>
-    <!-- Loader -->
-    <div id="loader">
-      <!-- TODO: replace with your Bunny image if you want -->
-      <img src="https://scanpacks.b-cdn.net/MonaLisa/ndelogo.png" alt="Neon Doorway Logo" id="nd-logo" />
-      <p class="powered-by">Powered by Neon Doorway</p>
-    </div>
+const scene = new THREE.Scene(); scene.background = new THREE.Color(0x000000);
+const camera = new THREE.PerspectiveCamera(60, innerWidth/innerHeight, 0.01, 1000);
+camera.position.set(0, 1.5, 3);
+new OrbitControls(camera, renderer.domElement);
 
-    <!-- AR -->
-    <div class="ar-scene-container">
-      <a-scene
-        id="scene"
-        mindar-image="imageTargetSrc: https://scanpacks.b-cdn.net/Chromeche/CHromeChe.mind; uiScanning: false;"
-        color-space="sRGB"
-        renderer="colorManagement: true; physicallyCorrectLights: true"
-        vr-mode-ui="enabled: false"
-        device-orientation-permission-ui="enabled: false"
-        style="visibility: hidden;"
-      >
-        <a-assets>
-          <!-- TODO: replace with your Bunny mp4 if you prefer -->
-          <video
-            id="chromeVideo"
-            src="https://scanpacks.b-cdn.net/Chromeche/chomeche2.mp4"
-            preload="auto"
-            loop
-            muted
-            crossorigin="anonymous"
-            playsinline
-            webkit-playsinline
-          ></video>
-        </a-assets>
+scene.add(new THREE.HemisphereLight(0xffffff, 0x222233, 1.0));
+const dir = new THREE.DirectionalLight(0xffffff, 1.0); dir.position.set(2,3,2); scene.add(dir);
 
-        <a-camera
-          position="0 0 0"
-          look-controls="enabled: false"
-          raycaster="objects: .clickable"
-          cursor="fuse: false; rayOrigin: mouse;"
-        ></a-camera>
+const loader = new GLTFLoader();
 
-        <a-entity mindar-image-target="targetIndex: 0">
-          <!-- Upright screen (90°) -->
-          <a-video
-            id="videoPlane"
-            src="#chromeVideo"
-            width="1.3"
-            height="1.0"
-            position="0 .3 0"
-            rotation="90 0 0"
-            autoplay
-            loop
-            muted
-            playsinline
-          ></a-video>
+// DRACO
+const draco = new DRACOLoader();
+draco.setDecoderPath('https://www.gstatic.com/draco/v1/decoders/');
+loader.setDRACOLoader(draco);
 
-          <!-- Tap hint -->
-          <a-entity id="tapHint" visible="false" position="0 1.1 0.01">
-            <a-plane
-              id="tapHintBg"
-              width="1.8"
-              height="0.36"
-              color="#ffb347"
-              opacity="0"
-              transparent="true"
-              material="side:double"
-              animation__fade="property=material.opacity; from:0; to:0.8; dir=alternate; dur:2500; loop:true; startEvents=hint-start; pauseEvents=hint-stop"
-            ></a-plane>
-            <a-entity
-              id="tapHintText"
-              text="value: Tap to enter; align: center; width: 2.8; color: #ffb347; anchor: center"
-              position="0 0 0.001"
-              material="opacity: 0; transparent: true"
-              animation__fade="property=material.opacity; from:0; to:1; dir=alternate; dur:2500; loop:true; startEvents=hint-start; pauseEvents=hint-stop"
-            ></a-entity>
-          </a-entity>
-        </a-entity>
-      </a-scene>
-    </div>
+// KTX2 (BasisU)
+const ktx2 = new KTX2Loader().setTranscoderPath('https://storage.googleapis.com/gltf-tmp/');
+ktx2.detectSupport(renderer);
+loader.setKTX2Loader(ktx2);
 
-    <!-- Click redirect layer -->
-    <div id="tap-catcher"></div>
+// Meshopt
+loader.setMeshoptDecoder(MeshoptDecoder);
 
-    <script>
-      // Ensure user-gesture-less autoplay works on iOS
-      const video = document.getElementById('chromeVideo');
-      video.muted = true; // double-ensure
+hud.textContent = 'Fetching…';
+loader.load(url,
+  (gltf) => {
+    hud.textContent = 'Loaded ✅';
+    const root = gltf.scene;
+    scene.add(root);
 
-      document.addEventListener('DOMContentLoaded', () => {
-        const scene = document.getElementById('scene');
-        const loader = document.getElementById('loader');
+    // Frame model
+    const box = new THREE.Box3().setFromObject(root);
+    const size = box.getSize(new THREE.Vector3()).length();
+    const center = box.getCenter(new THREE.Vector3());
+    root.position.sub(center);
+    camera.position.set(0, size*0.5, size*1.2);
+    camera.lookAt(0,0,0);
 
-        // Optional: warm cache for .mind file (CORS must allow)
-        fetch('https://scanpacks.b-cdn.net/Chromeche/CHromeChe.mind').catch(() => {});
+    animate();
+  },
+  (xhr) => {
+    const pct = xhr.total ? (xhr.loaded/xhr.total*100).toFixed(1) : ((xhr.loaded/1024)|0) + 'KB';
+    hud.textContent = 'Loading… ' + pct;
+  },
+  (err) => {
+    console.error('GLB load error:', err);
+    hud.textContent = '❌ Load error. See console.';
+  }
+);
 
-        scene.addEventListener('arReady', () => {
-          loader.style.opacity = '0';
-          setTimeout(() => {
-            loader.style.display = 'none';
-            scene.style.visibility = 'visible';
-          }, 500);
-        });
-      });
-
-      const target = document.querySelector('[mindar-image-target]');
-      const tapCatcher = document.getElementById('tap-catcher');
-      const tapHint = document.getElementById('tapHint');
-      const tapHintBg = document.getElementById('tapHintBg');
-      const tapHintText = document.getElementById('tapHintText');
-
-      let markerVisible = false;
-      const HINT_WINDOW_MS = 2000;
-      let hintTimer = null;
-
-      function startHintPulse() {
-        tapHint.setAttribute('visible', true);
-        tapHintBg.emit('hint-start');
-        tapHintText.emit('hint-start');
-      }
-      function stopHintPulse() {
-        tapHintBg.emit('hint-stop');
-        tapHintText.emit('hint-stop');
-        tapHint.setAttribute('visible', false);
-      }
-
-      function startHintWatcher() {
-        if (hintTimer) return;
-        hintTimer = setInterval(() => {
-          const d = video.duration || 0;
-          const t = video.currentTime || 0;
-          const nearEnd = d > 0 && (d - t) <= (HINT_WINDOW_MS / 1000);
-          if (markerVisible && nearEnd) {
-            if (!tapHint.getAttribute('visible')) startHintPulse();
-          } else {
-            if (tapHint.getAttribute('visible')) stopHintPulse();
-          }
-        }, 120);
-      }
-      function stopHintWatcher() {
-        if (hintTimer) {
-          clearInterval(hintTimer);
-          hintTimer = null;
-        }
-        stopHintPulse();
-      }
-
-      target.addEventListener('targetFound', () => {
-        markerVisible = true;
-        tapCatcher.style.display = 'block';
-        video.play().catch(() => {}); // iOS may need a user tap first
-        startHintWatcher();
-      });
-
-      target.addEventListener('targetLost', () => {
-        markerVisible = false;
-        tapCatcher.style.display = 'none';
-        video.pause();
-        stopHintWatcher();
-      });
-
-      // TODO: change destination (Song link / IG / landing)
-      tapCatcher.addEventListener('click', () => {
-        window.location.href = 'https://www.instagram.com/rickfouche';
-      });
-    </script>
-  </body>
+function animate(){ requestAnimationFrame(animate); renderer.render(scene, camera); }
+addEventListener('resize', ()=>{ camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
+</script>
+</body>
 </html>
