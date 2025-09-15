@@ -48,15 +48,26 @@
     arjs="sourceType: webcam; videoTexture: true; debugUIEnabled: false; trackingMethod: best;">
 
     <!-- GPS camera -->
-    <a-camera gps-camera></a-camera>
+    <a-camera gps-camera id="gpsCam"></a-camera>
 
-    <!-- The GLB model (+ visibility state machine) -->
-    <a-entity id="model"
-      gps-entity-place="latitude:0; longitude:0;"
-      scale="8 8 8"
-      rotation="0 0 0"
-      record-visibility="within:25; grace:300; fade:320; minVisible:700; cooldown:150; settlePulse:1.05; settleDelta:1.5"
-      animation__spin="property: rotation; to: 0 360 0; loop: true; dur: 8000; autoplay: true">
+    <!-- Wrapper handles appear/disappear and grounding -->
+    <a-entity id="recordWrap"
+      visible="false"
+      scale="0.001 0.001 0.001"
+      animation__appear="property: scale; to: 1 1 1; dur: 320; easing: easeOutQuad; startEvents: rc-appear"
+      animation__disappear="property: scale; to: 0.001 0.001 0.001; dur: 300; easing: easeInQuad; startEvents: rc-disappear">
+
+      <!-- soft shadow disc -->
+      <a-circle rotation="-90 0 0" radius="0.6" position="0 0.01 0"
+        material="color:#000; opacity:0.25"></a-circle>
+
+      <!-- GLB model (initially positioned by GPS, then 'locked') -->
+      <a-entity id="model"
+        gps-entity-place="latitude:0; longitude:0;"
+        scale="8 8 8"
+        rotation="0 0 0"
+        animation__spin="property: rotation; to: 0 360 0; loop: true; dur: 8000; autoplay: true">
+      </a-entity>
     </a-entity>
   </a-scene>
 
@@ -67,8 +78,6 @@
 
     const lat = toNum(params.get('lat'));
     const lng = toNum(params.get('lng'));
-
-    // Default GLB + decode any URL-encoded ?model=... from the pin page
     const modelParam = params.get('model');
     const modelUrl = modelParam ? decodeURIComponent(modelParam)
                                 : 'https://recordcatcher.b-cdn.net/glb/Nderec.glb';
@@ -76,21 +85,27 @@
     const statusEl = $('#status');
     const coordsEl = $('#coords');
     const modelEl  = $('#model');
+    const wrapEl   = $('#recordWrap');
+    const camEl    = $('#gpsCam');
 
-    // Validate coords
     if (isNaN(lat) || isNaN(lng)) {
       statusEl.textContent = 'Missing or invalid lat/lng in URL.';
     } else {
       coordsEl.textContent = `lat: ${lat.toFixed(6)}, lng: ${lng.toFixed(6)}`;
     }
 
-    // Place model & load GLB
-    modelEl.setAttribute('gps-entity-place', `latitude: ${lat}; longitude: ${lng};`);
+    // Load model
     modelEl.setAttribute('gltf-model', `url(${modelUrl})`);
-
-    // Diagnostics
     modelEl.addEventListener('model-loaded', () => {
       statusEl.textContent = 'Model loaded. Walk toward the target point.';
+      // ensure sub-materials can fade if you ever use opacity later
+      const mesh = modelEl.getObject3D('mesh');
+      if (mesh) mesh.traverse(o => {
+        if (o.isMesh && o.material) {
+          const mats = Array.isArray(o.material) ? o.material : [o.material];
+          mats.forEach(m => { m.transparent = true; m.needsUpdate = true; });
+        }
+      });
     });
     modelEl.addEventListener('model-error', (e) => {
       const d = e && e.detail ? e.detail : {};
@@ -100,7 +115,10 @@
       console.log('model-error', d);
     });
 
-    // GPS status
+    // Place model at target GPS (AR.js will convert to world coords)
+    modelEl.setAttribute('gps-entity-place', `latitude: ${lat}; longitude: ${lng};`);
+
+    // Show coords origin set
     window.addEventListener('gps-camera-origin-coord-set', () => {
       statusEl.textContent = 'Origin set. Rendering at target.';
     });
@@ -146,167 +164,90 @@
       }
     });
 
-    // --- Visibility State Machine (A-Frame component) ---
-    AFRAME.registerComponent('record-visibility', {
-      schema: {
-        within: {type:'number', default:25},     // meters to consider "positive"
-        grace: {type:'number', default:300},     // ms negative tolerance
-        fade: {type:'number', default:320},      // ms fade in/out
-        minVisible: {type:'number', default:700},// ms min visible time before honoring negative
-        cooldown: {type:'number', default:150},  // ms ignore positives after fade-out
-        settlePulse: {type:'number', default:1.05}, // scale pulse on reposition
-        settleDelta: {type:'number', default:1.5}   // meters movement that triggers pulse
-      },
-      init() {
-        this.state = 'HIDDEN';
-        this.lastVisibleAt = 0;
-        this.lastHideAt = 0;
-        this.graceTimer = null;
-        this.targetLL = {lat: lat, lng: lng};
-        this.lastDistance = Infinity;
-        this.lastWorldPos = new THREE.Vector3();
-        this.fading = null;
-        this.baseScale = this.el.object3D.scale.clone();
+    // ---- Appear / Disappear based on proximity + Lock-on-first-fix ----
+    const WITHIN_METERS = 25; // proximity window to show
+    const ACC_OK = 60;        // acceptable GPS accuracy (m)
+    let locked = false;       // once true, we remove gps-entity-place so it stops "following"
+    let lastLockAttempt = 0;
 
-        // Prepare materials to allow opacity tweening
-        this.el.addEventListener('model-loaded', () => {
-          this.traverseMaterials_(m => { m.transparent = true; if (m.opacity == null) m.opacity = 1; });
-          // start hidden
-          this.setOpacity_(0);
-          this.state = 'HIDDEN';
-        });
+    // Helper: great-circle distance
+    function haversine(lat1, lon1, lat2, lon2) {
+      const R = 6371000; // m
+      const toRad = x => x * Math.PI / 180;
+      const dLat = toRad(lat2 - lat1);
+      const dLon = toRad(lon2 - lon1);
+      const a = Math.sin(dLat/2)**2 +
+                Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+                Math.sin(dLon/2)**2;
+      return 2 * R * Math.asin(Math.sqrt(a));
+    }
 
-        // Start GPS watch
-        this.watchId = navigator.geolocation.watchPosition(
-          pos => this.onGeo_(pos),
-          err => console.warn('geo error', err),
-          {enableHighAccuracy:true, maximumAge:1000, timeout:10000}
-        );
-      },
-      remove() {
-        if (this.watchId) navigator.geolocation.clearWatch(this.watchId);
-        if (this.graceTimer) clearTimeout(this.graceTimer);
-      },
-      onGeo_(pos) {
-        const {latitude, longitude, accuracy} = pos.coords;
-        const d = this.haversine_(latitude, longitude, this.targetLL.lat, this.targetLL.lng);
-        const positive = (d <= this.data.within) && (accuracy == null || accuracy <= 50);
-
-        // Reposition pulse if the system moved the model notably (feels intentional)
-        if (isFinite(this.lastDistance) && Math.abs(d - this.lastDistance) > this.data.settleDelta) {
-          this.pulseScale_();
-        }
-        this.lastDistance = d;
-
-        const now = performance.now();
-
-        if (positive) {
-          // handle cooldown
-          if (now - this.lastHideAt < this.data.cooldown) return;
-          if (this.state === 'HIDDEN' || this.state === 'FADING_OUT') {
-            this.toAppearing_();
-          } else if (this.state === 'GRACE') {
-            // bounce back to visible without a fade
-            this.toVisible_();
-          }
-        } else {
-          if (this.state === 'VISIBLE') {
-            // obey minVisible
-            if (now - this.lastVisibleAt < this.data.minVisible) return;
-            this.toGrace_();
-          } else if (this.state === 'APPEARING') {
-            // if we lose immediately during appear, go to grace → fade out if persists
-            this.toGrace_();
-          }
-        }
-      },
-      // --- State transitions ---
-      toAppearing_() {
-        this.clearGrace_();
-        this.state = 'APPEARING';
-        this.fadeTo_(1, this.data.fade, () => this.toVisible_());
-      },
-      toVisible_() {
-        this.clearGrace_();
-        this.state = 'VISIBLE';
-        this.lastVisibleAt = performance.now();
-        this.setOpacity_(1);
-      },
-      toGrace_() {
-        this.clearGrace_();
-        this.state = 'GRACE';
-        this.graceTimer = setTimeout(() => {
-          if (this.state === 'GRACE') this.toFadingOut_();
-        }, this.data.grace);
-      },
-      toFadingOut_() {
-        this.clearGrace_();
-        this.state = 'FADING_OUT';
-        this.fadeTo_(0, this.data.fade, () => {
-          this.state = 'HIDDEN';
-          this.lastHideAt = performance.now();
-        });
-      },
-      clearGrace_() {
-        if (this.graceTimer) { clearTimeout(this.graceTimer); this.graceTimer = null; }
-      },
-      // --- Visual helpers ---
-      traverseMaterials_(fn) {
-        const mesh = this.el.getObject3D('mesh');
-        if (!mesh) return;
-        mesh.traverse(o => { if (o.isMesh && o.material) {
-          const mats = Array.isArray(o.material) ? o.material : [o.material];
-          mats.forEach(fn);
-        }});
-      },
-      setOpacity_(val) {
-        this.traverseMaterials_(m => { m.opacity = val; m.needsUpdate = true; });
-      },
-      fadeTo_(target, dur, onDone) {
-        if (this.fading) cancelAnimationFrame(this.fading);
-        const start = performance.now();
-        let from;
-        this.traverseMaterials_(m => { if (from == null) from = m.opacity; });
-        const tick = (now) => {
-          const t = Math.min(1, (now - start) / dur);
-          const eased = t < 0.5 ? 2*t*t : -1 + (4 - 2*t)*t; // easeInOutQuad
-          const val = from + (target - from) * eased;
-          this.setOpacity_((val));
-          if (t < 1) { this.fading = requestAnimationFrame(tick); }
-          else { this.fading = null; onDone && onDone(); }
-        };
-        this.fading = requestAnimationFrame(tick);
-      },
-      pulseScale_() {
-        const o3d = this.el.object3D;
-        const base = this.baseScale;
-        const up = this.data.settlePulse;
-        const dur = 180;
-        // animate up then back
-        const start = performance.now();
-        const step = (now) => {
-          const t = Math.min(1, (now - start) / dur);
-          const s = (t < 0.5)
-            ? 1 + (up - 1) * (t / 0.5)          // up to peak
-            : up - (up - 1) * ((t - 0.5) / 0.5);// back to 1
-          o3d.scale.set(base.x * s, base.y * s, base.z * s);
-          if (t < 1) requestAnimationFrame(step);
-          else o3d.scale.copy(base);
-        };
-        requestAnimationFrame(step);
-      },
-      // --- Utils ---
-      haversine_(lat1, lon1, lat2, lon2) {
-        const R = 6371000; // m
-        const toRad = x => x * Math.PI / 180;
-        const dLat = toRad(lat2 - lat1);
-        const dLon = toRad(lon2 - lon1);
-        const a = Math.sin(dLat/2)**2 +
-                  Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
-                  Math.sin(dLon/2)**2;
-        return 2 * R * Math.asin(Math.sqrt(a));
+    // Show/hide wrapper using scale anims
+    function appearWrap() {
+      if (!wrapEl.getAttribute('visible')) {
+        wrapEl.setAttribute('visible', true);
+        wrapEl.emit('rc-appear');
       }
-    });
+    }
+    function disappearWrap() {
+      if (wrapEl.getAttribute('visible')) {
+        wrapEl.emit('rc-disappear');
+        setTimeout(() => wrapEl.setAttribute('visible', false), 300);
+      }
+    }
+
+    // Try to lock the model's current world position (so it stops following GPS updates)
+    function tryLockStatic() {
+      if (locked) return;
+      const o3d = modelEl.object3D;
+      // Make sure we've been placed at least once by AR.js
+      const pos = new THREE.Vector3();
+      o3d.getWorldPosition(pos);
+      // Convert to local (scene) if needed (model is direct child, so local==world here)
+      modelEl.removeAttribute('gps-entity-place'); // stop AR.js from moving it
+      modelEl.setAttribute('position', `${pos.x} ${pos.y} ${pos.z}`);
+      locked = true;
+      // tiny "settle" pulse on the wrapper so it feels intentional
+      settlePulse();
+    }
+
+    function settlePulse() {
+      const base = wrapEl.object3D.scale.clone();
+      const up = 1.05;
+      const dur = 180;
+      const t0 = performance.now();
+      function step(now) {
+        const t = Math.min(1, (now - t0) / dur);
+        const s = (t < 0.5)
+          ? 1 + (up - 1) * (t / 0.5)
+          : up - (up - 1) * ((t - 0.5) / 0.5);
+        wrapEl.object3D.scale.set(base.x * s, base.y * s, base.z * s);
+        if (t < 1) requestAnimationFrame(step);
+        else wrapEl.object3D.scale.copy(base);
+      }
+      requestAnimationFrame(step);
+    }
+
+    // Watch GPS for proximity + lock logic
+    const watchId = navigator.geolocation.watchPosition(
+      (pos) => {
+        const {latitude:clat, longitude:clng, accuracy} = pos.coords;
+        const dist = haversine(clat, clng, lat, lng);
+        const ok = dist <= WITHIN_METERS && (accuracy == null || accuracy <= ACC_OK);
+
+        if (ok) appearWrap();
+        else    disappearWrap();
+
+        // Once we're close enough, lock position so it no longer "walks" with you
+        const now = performance.now();
+        if (ok && !locked && (now - lastLockAttempt > 500)) {
+          tryLockStatic();
+          lastLockAttempt = now;
+        }
+      },
+      (err) => console.warn('geo error', err),
+      { enableHighAccuracy:true, maximumAge:1000, timeout:10000 }
+    );
   </script>
 </body>
 </html>
