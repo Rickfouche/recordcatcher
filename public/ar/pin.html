@@ -47,9 +47,9 @@
         <input id="title" placeholder="e.g. Park — 85th Street" />
       </div>
       <div class="row">
-        <label>Model URL (GLB or viewer)</label> <!-- CHANGED -->
-        <!-- updated default -->
-        <input id="song" value="https://recordcatcher.b-cdn.net/glb/Nderec.glb" /> <!-- CHANGED -->
+        <label>Model URL (GLB or viewer)</label>
+        <!-- default points to your new GLB -->
+        <input id="song" value="https://recordcatcher.b-cdn.net/glb/Nderec.glb" />
       </div>
 
       <!-- Buttons -->
@@ -73,10 +73,8 @@
     const SUPABASE_ANON_KEY =
       'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJsZWpweGhrZnRpaGxjaGtsd3ViIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTcxMDUyMDIsImV4cCI6MjA3MjY4MTIwMn0.CBunws9Ge-zi858JS7LBen6fTYV_0fZ1__D2VdjTDtM';
     const MASTER_UID = '2f545801-1368-418b-8533-aa3ee41806f2';
-    const CANONICAL_SELF = '/ar/pin.html';
-
-    // Netlify absolute root (replace with your deploy domain)
-    // const SITE_ROOT = 'https://YOUR_NETLIFY_DOMAIN.netlify.app'; // NOT NEEDED NOW
+    const CANONICAL_SELF = new URL(location.pathname, location.origin).href; // current page absolute
+    const TABLE = 'pins'; // <-- adjust if your table name differs
 
     // ===== Supabase client =====
     const { createClient } = supabase;
@@ -95,6 +93,36 @@
     const out = document.getElementById('out');
     const openHere = document.getElementById('openHere');
 
+    // ===== Helpers =====
+    function show(result) {
+      out.textContent = typeof result === 'string'
+        ? result
+        : JSON.stringify(result, null, 2);
+    }
+    function withCacheBuster(url) {
+      const raw = (url || '').trim();
+      return raw + (raw.includes('?') ? '&' : '?') + 'v=' + Date.now();
+    }
+    function encodeModel(url) {
+      return encodeURIComponent(withCacheBuster(url));
+    }
+    function geoHtmlURL() {
+      return new URL('./geo.html', location.href).href;
+    }
+
+    // Promise-based current position (falls back to latestPos)
+    let latestPos = null;
+    async function getCurrentCoords() {
+      if (!navigator.geolocation) throw new Error('Geolocation not supported');
+      return new Promise((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(
+          p => resolve(p.coords),
+          err => latestPos ? resolve(latestPos.coords) : reject(err),
+          { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+        );
+      });
+    }
+
     // ===== Auth status =====
     async function refreshAuth() {
       const { data, error } = await sb.auth.getUser();
@@ -107,8 +135,38 @@
     sb.auth.onAuthStateChange(() => refreshAuth());
     refreshAuth();
 
-    // ===== GPS watcher =====
-    let latestPos = null;
+    // Login: magic link
+    login.onclick = async () => {
+      const addr = (email.value || '').trim();
+      if (!addr) return show('Enter an email first.');
+      show('Sending magic link…');
+      const { data, error } = await sb.auth.signInWithOtp({
+        email: addr,
+        options: { emailRedirectTo: CANONICAL_SELF }
+      });
+      if (error) return show(error);
+      show('Magic link sent. Check your email and open it in Safari on iPhone.');
+    };
+
+    // Logout
+    logoutBtn.onclick = async () => {
+      await sb.auth.signOut();
+      refreshAuth();
+      show('Logged out.');
+    };
+
+    // Handle access_token in URL (after magic link)
+    (async function handleMagicLink() {
+      const hash = new URLSearchParams(location.hash.slice(1));
+      if (hash.get('access_token')) {
+        // Supabase JS handles this internally via onAuthStateChange; just tidy URL
+        history.replaceState({}, '', location.pathname);
+        refreshAuth();
+        show('Logged in via magic link.');
+      }
+    })();
+
+    // ===== GPS watcher (UI) =====
     if (navigator.geolocation) {
       navigator.geolocation.watchPosition(p => {
         latestPos = p;
@@ -118,46 +176,83 @@
       gps.textContent = 'Geolocation not supported';
     }
 
-    // ===== Helpers =====
-    function show(result) {
-      out.textContent = typeof result === 'string'
-        ? result
-        : JSON.stringify(result, null, 2);
-    }
-
     // ===== Open Geo AR Here =====
-    openHere.onclick = () => {
-      const rawDefault = 'https://recordcatcher.b-cdn.net/glb/Nderec.glb'; // CHANGED
-      const raw = (song.value || rawDefault).trim();
+    openHere.onclick = async () => {
+      try {
+        openHere.disabled = true;
+        const coords = await getCurrentCoords();
+        const lat = coords.latitude.toFixed(6);
+        const lng = coords.longitude.toFixed(6);
+        if (gps) gps.textContent = `${lat}, ${lng} (±${Math.round(coords.accuracy)}m)`;
 
-      // add/merge cache-buster BEFORE encoding
-      const withBust = raw + (raw.includes('?') ? '&' : '?') + 'v=' + Date.now();
-      const model = encodeURIComponent(withBust);
+        const rawDefault = 'https://recordcatcher.b-cdn.net/glb/Nderec.glb';
+        const modelParam = encodeModel(song.value || rawDefault);
 
-      if (!navigator.geolocation) {
-        alert('Geolocation not supported on this device/browser.');
-        return;
+        const url = `${geoHtmlURL()}?lat=${lat}&lng=${lng}&model=${modelParam}`;
+        location.href = url;
+      } catch (err) {
+        alert('Location error: ' + err.message + '\n• Go outside / enable GPS\n• On iPhone use Safari');
+      } finally {
+        openHere.disabled = false;
       }
-      openHere.disabled = true;
-      const restore = () => (openHere.disabled = false);
+    };
 
-      navigator.geolocation.getCurrentPosition(
-        (p) => {
-          const lat = p.coords.latitude.toFixed(6);
-          const lng = p.coords.longitude.toFixed(6);
-          if (gps) gps.textContent = `${lat}, ${lng} (±${Math.round(p.coords.accuracy)}m)`;
+    // ===== Admin Drop (no login required) =====
+    dropAdmin.onclick = async () => {
+      try {
+        dropAdmin.disabled = true;
+        show('Dropping (admin)…');
 
-          // Robust absolute URL to ./geo.html (no SITE_ROOT needed)
-          const geoURL = new URL('./geo.html', location.href).href; // CHANGED
-          location.href = `${geoURL}?lat=${lat}&lng=${lng}&model=${model}`;
-          restore();
-        },
-        (err) => {
-          alert('Location error: ' + err.message + '\n• Go outside / enable GPS\n• On iPhone use Safari');
-          restore();
-        },
-        { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
-      );
+        const coords = await getCurrentCoords();
+        const payload = {
+          title: (title.value || '').trim() || 'Untitled Pin',
+          model_url: withCacheBuster(song.value || 'https://recordcatcher.b-cdn.net/glb/Nderec.glb'),
+          lat: Number(coords.latitude.toFixed(6)),
+          lng: Number(coords.longitude.toFixed(6)),
+          created_by: 'admin', // adjust for your schema
+        };
+
+        // Insert — requires RLS to allow anon insert or use a service function
+        const { data, error } = await sb.from(TABLE).insert(payload).select('*').single();
+        if (error) return show({ error });
+
+        show({ ok: true, data });
+      } catch (e) {
+        show({ error: String(e) });
+      } finally {
+        dropAdmin.disabled = false;
+      }
+    };
+
+    // ===== Client Insert (requires login) =====
+    dropClient.onclick = async () => {
+      try {
+        dropClient.disabled = true;
+        const { data: userData, error: userErr } = await sb.auth.getUser();
+        if (userErr || !userData?.user) {
+          show('You must be logged in to insert as client.');
+          return;
+        }
+
+        show('Dropping (client)…');
+        const coords = await getCurrentCoords();
+        const payload = {
+          title: (title.value || '').trim() || 'Untitled Pin',
+          model_url: withCacheBuster(song.value || 'https://recordcatcher.b-cdn.net/glb/Nderec.glb'),
+          lat: Number(coords.latitude.toFixed(6)),
+          lng: Number(coords.longitude.toFixed(6)),
+          created_by: userData.user.id, // adjust for your schema
+        };
+
+        const { data, error } = await sb.from(TABLE).insert(payload).select('*').single();
+        if (error) return show({ error });
+
+        show({ ok: true, data });
+      } catch (e) {
+        show({ error: String(e) });
+      } finally {
+        dropClient.disabled = false;
+      }
     };
   </script>
 </body>

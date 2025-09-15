@@ -15,7 +15,7 @@
       padding:8px 12px; border-radius:10px; z-index:10; text-align:center; }
     #hud small { opacity:.8; display:block; }
     #btns { margin-top:6px; display:flex; gap:6px; justify-content:center; flex-wrap:wrap; }
-    button { padding:6px 10px; border:0; border-radius:8px; font-weight:700; cursor:pointer; }
+    button { padding:6px 10px; border:0; border-radius:8px; font-weight:700; cursor:pointer }
     #motionGate { position:fixed; inset:0; display:none; place-items:center; z-index:9999;
       background:rgba(0,0,0,.85); color:#fff; text-align:center; padding:24px; font:16px system-ui; }
     #motionGate button { margin-top:12px; }
@@ -74,39 +74,46 @@
     const lat = toNum(params.get('lat'));
     const lng = toNum(params.get('lng'));
 
-    // NEW DEFAULT GLB
-    const modelUrl = params.get('model') ||
-      'https://recordcatcher.b-cdn.net/glb/Nderec.glb';
+    // Default GLB + decode any URL-encoded ?model=... from the pin page
+    const modelParam = params.get('model');
+    const modelUrl = modelParam
+      ? decodeURIComponent(modelParam)
+      : 'https://recordcatcher.b-cdn.net/glb/Nderec.glb';
 
     const statusEl = $('#status');
     const coordsEl = $('#coords');
     const modelEl  = $('#model');
     const markerEl = $('#marker');
 
-    // Validate
+    // Validate coords
     if (isNaN(lat) || isNaN(lng)) {
       statusEl.textContent = 'Missing or invalid lat/lng in URL.';
     } else {
       coordsEl.textContent = `lat: ${lat.toFixed(6)}, lng: ${lng.toFixed(6)}`;
     }
 
-    // Set model + place it
-    modelEl.setAttribute(
-      'gltf-model',
-      `src: ${modelUrl}; dracoDecoderPath: https://www.gstatic.com/draco/v1/decoders/; ktx2TranscoderPath: https://storage.googleapis.com/gltf-tmp/;`
-    );
+    // Place model + marker
     modelEl.setAttribute('gps-entity-place', `latitude: ${lat}; longitude: ${lng};`);
     markerEl.setAttribute('gps-entity-place', `latitude: ${lat}; longitude: ${lng};`);
 
-    // Model load diagnostics
+    // Load model (simple, A-Frame 1.2 friendly)
+    modelEl.setAttribute('gltf-model', `url(${modelUrl})`);
+
+    // Diagnostics
     modelEl.addEventListener('model-loaded', () => {
       statusEl.textContent = 'Model loaded. Walk toward the target point.';
       markerEl.setAttribute('visible', false);
     });
     modelEl.addEventListener('model-error', (e) => {
-      statusEl.textContent = 'Model failed to load. Showing marker.';
+      const detail = e && e.detail ? e.detail : {};
+      const msg = [
+        'Model failed to load.',
+        detail && detail.src ? `src: ${detail.src}` : '',
+        detail && detail.message ? `msg: ${detail.message}` : ''
+      ].filter(Boolean).join(' ');
+      statusEl.textContent = msg + ' Showing green marker.';
       markerEl.setAttribute('visible', true);
-      console.log('model-error', e.detail);
+      console.log('model-error', detail);
     });
 
     // GPS status
@@ -114,7 +121,7 @@
       statusEl.textContent = 'Origin set. Rendering at target.';
     });
 
-    // Controls
+    // Scale controls
     let baseScale = 8;
     $('#bigger').onclick = () => {
       baseScale *= 1.25;
@@ -130,6 +137,7 @@
       baseScale = 8;
       modelEl.setAttribute('scale', '8 8 8');
       modelEl.setAttribute('rotation', '0 0 0');
+      markerEl.setAttribute('scale', '2 2 2');
     };
 
     // iOS motion permission
