@@ -1,0 +1,194 @@
+<!doctype html>
+<html>
+<head>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>RecordCatcher — Pin Maker</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+  <style>
+    :root{--bg:#0b0b0b;--card:#111;--line:#222;--txt:#fff}
+    html,body{height:100%;margin:0;background:var(--bg);color:var(--txt);font:15px system-ui}
+    .wrap{display:grid;grid-template-columns:1fr 360px;height:100%}
+    #map{height:100%}
+    aside{border-left:1px solid var(--line);background:var(--card);display:grid;grid-template-rows:auto 1fr auto}
+    header,footer{padding:10px;border-bottom:1px solid var(--line)}
+    footer{border-top:1px solid var(--line);border-bottom:0}
+    .btn{background:#0a84ff;color:#fff;border:0;border-radius:10px;padding:10px 12px;font-weight:700;cursor:pointer}
+    .list{overflow:auto}
+    .pin{padding:10px;border-bottom:1px solid var(--line);display:grid;gap:6px}
+    .row{display:grid;grid-template-columns:1fr auto;gap:6px;align-items:center}
+    input[type="text"]{width:100%;padding:8px;border-radius:8px;border:1px solid #333;background:#0e0e0e;color:#fff}
+    input.small{width:110px}
+    .meta{opacity:.8;font-size:12px}
+    .chips button{margin-right:6px}
+    .danger{background:#ff3b30}
+    .muted{opacity:.8}
+    .note{padding:8px 10px;background:#0e0e0e;border-top:1px solid var(--line)}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div id="map"></div>
+    <aside>
+      <header>
+        <div style="display:flex;gap:8px;align-items:center;justify-content:space-between">
+          <strong>Pin Maker</strong>
+          <button class="btn" id="openViewer">Open Viewer</button>
+        </div>
+      </header>
+      <div class="list" id="pinList"></div>
+      <footer>
+        <div class="meta" id="status">Click map to add a pin (5-ft radius, non-overlapping).</div>
+      </footer>
+      <div class="note">
+        <div class="meta">Default GLB is used if a pin’s <code>model_url</code> is empty.</div>
+      </div>
+    </aside>
+  </div>
+
+  <script>
+    // === CONFIG ===
+    const SUPABASE_URL = 'https://YOUR-PROJECT.supabase.co';
+    const SUPABASE_ANON_KEY = 'YOUR-ANON-KEY';
+    const DEFAULT_GLB = 'https://recordcatcher.b-cdn.net/glb/Nderec.glb';
+    const PIN_RADIUS_M = 1.524;          // 5 ft in meters
+    const NO_OVERLAP_MIN = PIN_RADIUS_M*2; // >= 3.048 m center-to-center
+
+    const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    const $ = s => document.querySelector(s);
+
+    const map = L.map('map').setView([40.7719,-73.9462], 14);
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OSM'}).addTo(map);
+
+    const state = { pins:[], markers:new Map() };
+
+    function fmt(v){ return Number(v).toFixed(6); }
+    function distMeters(aLat,aLng,bLat,bLng){
+      const R=6371000, toRad=x=>x*Math.PI/180;
+      const dLat=toRad(bLat-aLat), dLon=toRad(bLng-aLng);
+      const A=Math.sin(dLat/2)**2 + Math.cos(toRad(aLat))*Math.cos(toRad(bLat))*Math.sin(dLon/2)**2;
+      return 2*R*Math.asin(Math.sqrt(A));
+    }
+
+    // Load pins from DB
+    async function loadPins(){
+      const {data, error} = await sb.from('pins').select('*').order('created_at',{ascending:false});
+      if(error){ $('#status').textContent = 'Load error: '+error.message; return; }
+      state.pins = data||[];
+      renderPins();
+    }
+
+    // Draw markers + sidebar
+    function renderPins(){
+      // clear markers not present
+      for (const [id, m] of state.markers.entries()){
+        if (!state.pins.find(p=>p.id===id)) { map.removeLayer(m); state.markers.delete(id); }
+      }
+      // add/update
+      state.pins.forEach(p=>{
+        if (!state.markers.has(p.id)){
+          const marker = L.marker([p.lat,p.lng], {draggable:true}).addTo(map);
+          marker.on('dragend', async (e)=>{
+            const ll = e.target.getLatLng();
+            if (wouldOverlap(ll.lat, ll.lng, p.id)) {
+              // revert
+              e.target.setLatLng([p.lat,p.lng]);
+              alert('Too close to another pin (5-ft radius cannot overlap).');
+            } else {
+              await updatePin(p.id, {lat: ll.lat, lng: ll.lng});
+            }
+          });
+          state.markers.set(p.id, marker);
+        } else {
+          state.markers.get(p.id).setLatLng([p.lat,p.lng]);
+        }
+      });
+
+      // sidebar
+      const list = $('#pinList');
+      list.innerHTML = '';
+      state.pins.forEach(p=>{
+        const row = document.createElement('div');
+        row.className='pin';
+        row.innerHTML = `
+          <div class="row">
+            <input type="text" class="name" value="${p.name||''}" placeholder="Street · time" />
+            <button class="btn danger del">Delete</button>
+          </div>
+          <div class="meta">${fmt(p.lat)}, ${fmt(p.lng)} · radius ${p.radius_m?.toFixed(2)||PIN_RADIUS_M} m</div>
+          <div class="row"><input type="text" class="title" placeholder="Track title" value="${p.track_title||''}"></div>
+          <div class="row"><input type="text" class="artist" placeholder="Artist" value="${p.track_artist||''}"></div>
+          <div class="row"><input type="text" class="cover" placeholder="Cover URL (optional)" value="${p.cover_url||''}"></div>
+          <div class="row"><input type="text" class="audio" placeholder="Audio URL (Bunny)" value="${p.audio_url||''}"></div>
+          <div class="row"><input type="text" class="model" placeholder="Model URL (GLB optional)" value="${p.model_url||''}"></div>
+          <div class="meta muted">Drag the marker to adjust. Changes save instantly.</div>
+        `;
+        // handlers
+        row.querySelector('.name').onchange = e => updatePin(p.id, {name: e.target.value});
+        row.querySelector('.title').onchange = e => updatePin(p.id, {track_title: e.target.value});
+        row.querySelector('.artist').onchange = e => updatePin(p.id, {track_artist: e.target.value});
+        row.querySelector('.cover').onchange = e => updatePin(p.id, {cover_url: e.target.value});
+        row.querySelector('.audio').onchange = e => updatePin(p.id, {audio_url: e.target.value});
+        row.querySelector('.model').onchange = e => updatePin(p.id, {model_url: e.target.value});
+        row.querySelector('.del').onclick = async ()=>{
+          if (!confirm('Delete this pin?')) return;
+          const {error} = await sb.from('pins').delete().eq('id', p.id);
+          if(error) return alert(error.message);
+          await loadPins();
+        };
+        list.appendChild(row);
+      });
+    }
+
+    function wouldOverlap(lat,lng, ignoreId=null){
+      return state.pins.some(p=>{
+        if (ignoreId && p.id===ignoreId) return false;
+        const d = distMeters(lat,lng,p.lat,p.lng);
+        const min = (p.radius_m||PIN_RADIUS_M) + PIN_RADIUS_M;
+        return d < min; // no intersect
+      });
+    }
+
+    // Add pin on map click
+    map.on('click', async (e)=>{
+      const {lat,lng} = e.latlng;
+      if (wouldOverlap(lat,lng)) {
+        $('#status').textContent = 'Too close to an existing pin (needs ≥ 10 ft center-to-center).';
+        return;
+      }
+      const name = autoName(lat,lng);
+      const {data, error} = await sb.from('pins').insert({
+        name, lat, lng, radius_m: PIN_RADIUS_M,
+        model_url: null, track_title: null, track_artist: null, cover_url: null, audio_url: null
+      }).select().single();
+      if(error){ alert(error.message); return; }
+      state.pins.unshift(data);
+      renderPins();
+      $('#status').textContent = `Added: ${name}`;
+    });
+
+    function autoName(lat,lng){
+      const now = new Date();
+      const hh = now.getHours()%12 || 12, mm = String(now.getMinutes()).padStart(2,'0');
+      // you can swap to reverse geocode later; for now embed rough coords
+      return `Pin ${fmt(lat)},${fmt(lng)} · ${hh}:${mm}`;
+    }
+
+    async function updatePin(id, patch){
+      const {error} = await sb.from('pins').update(patch).eq('id', id);
+      if(error){ alert(error.message); return; }
+      // mirror in local state
+      const p = state.pins.find(x=>x.id===id);
+      Object.assign(p, patch);
+      renderPins();
+    }
+
+    // Open viewer
+    $('#openViewer').onclick = ()=> location.href = 'geo1.html';
+
+    // boot
+    loadPins();
+  </script>
+</body>
+</html>

@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>RecordCatcher — Geo1 Viewer</title>
+  <script src="https://aframe.io/releases/1.2.0/aframe.min.js"></script>
+  <script src="https://raw.githack.com/AR-js-org/AR.js/3.3.3/aframe/build/aframe-ar-nft.js"></script>
+  <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+  <style>
+    html,body{margin:0;height:100%;background:#000;overflow:hidden;font:14px system-ui;color:#fff}
+    #hud{position:fixed;top:10px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.6);
+      padding:8px 12px;border-radius:10px;z-index:10;text-align:center}
+    #player{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);z-index:12;
+      background:rgba(0,0,0,.8);padding:10px 12px;border:1px solid #222;border-radius:12px;display:none;min-width:260px}
+    #player .row{display:flex;align-items:center;gap:8px}
+    #player img{width:44px;height:44px;object-fit:cover;border-radius:6px;border:1px solid #222}
+    .btn{background:#0a84ff;color:#fff;border:0;border-radius:10px;padding:8px 12px;font-weight:700;cursor:pointer}
+    .btn.flat{background:#222}
+  </style>
+</head>
+<body>
+  <div id="hud"><span id="status">Loading…</span> · <span id="near">Near pins: 0</span></div>
+  <div id="player">
+    <div class="row">
+      <img id="cover" alt="">
+      <div style="flex:1">
+        <div id="title" style="font-weight:700"></div>
+        <div id="artist" style="opacity:.8"></div>
+      </div>
+      <button id="play" class="btn">Play</button>
+      <button id="stop" class="btn flat">Stop</button>
+    </div>
+  </div>
+
+  <a-scene vr-mode-ui="enabled:false" renderer="antialias:true; alpha:true" embedded
+           arjs="sourceType: webcam; videoTexture: true; debugUIEnabled: false; trackingMethod: best;">
+    <a-camera gps-camera id="gpsCam"></a-camera>
+    <a-entity id="spawnRoot"></a-entity>
+  </a-scene>
+
+  <script>
+    // === CONFIG ===
+    const SUPABASE_URL = 'https://YOUR-PROJECT.supabase.co';
+    const SUPABASE_ANON_KEY = 'YOUR-ANON-KEY';
+    const DEFAULT_GLB = 'https://recordcatcher.b-cdn.net/glb/Nderec.glb';
+    const ACC_OK = 60;            // m
+    const MAX_VISIBLE = 7;
+
+    const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    const $ = s=>document.querySelector(s);
+    const statusEl=$('#status'), nearEl=$('#near'), rootEl=$('#spawnRoot');
+
+    // util
+    const hav=(a,b,c,d)=>{const R=6371000,rad=x=>x*Math.PI/180;const dLat=rad(c-a),dLon=rad(d-b);
+      const A=Math.sin(dLat/2)**2 + Math.cos(rad(a))*Math.cos(rad(c))*Math.sin(dLon/2)**2;
+      return 2*R*Math.asin(Math.sqrt(A));};
+
+    let pins=[];
+    let audio = new Audio(); audio.preload='metadata';
+
+    async function loadPins(){
+      const {data,error}=await sb.from('pins').select('*');
+      if(error){ statusEl.textContent='Load error: '+error.message; return; }
+      pins = data||[];
+      statusEl.textContent = `Loaded ${pins.length} pins. Walk toward one.`;
+    }
+
+    // Spawn/Despawn controller
+    const active = new Map(); // pinId -> {wrap, model, locked}
+    function ensureDespawn(id){
+      const node = active.get(id);
+      if (!node) return;
+      node.wrap.emit('rc-disappear'); setTimeout(()=>node.wrap.parentNode.removeChild(node.wrap),300);
+      active.delete(id);
+    }
+    function ensureSpawn(pin){
+      if (active.has(pin.id)) return;
+      // wrap with appear/disappear + tap-to-lock
+      const wrap = document.createElement('a-entity');
+      wrap.setAttribute('visible','false');
+      wrap.setAttribute('scale','0.001 0.001 0.001');
+      wrap.setAttribute('animation__appear','property: scale; to: 1 1 1; dur: 320; easing: easeOutQuad; startEvents: rc-appear');
+      wrap.setAttribute('animation__disappear','property: scale; to: 0.001 0.001 0.001; dur: 300; easing: easeInQuad; startEvents: rc-disappear');
+
+      const model = document.createElement('a-entity');
+      model.setAttribute('gltf-model', `url(${pin.model_url||DEFAULT_GLB})`);
+      model.setAttribute('gps-entity-place', `latitude:${pin.lat}; longitude:${pin.lng};`);
+      model.setAttribute('scale','8 8 8');
+      model.setAttribute('animation__spin','property: rotation; to: 0 360 0; loop: true; dur: 8000; autoplay: true');
+
+      // tap to lock (stops following) + open player
+      let locked=false;
+      model.addEventListener('click', ()=>{
+        if (!locked){
+          const p = new THREE.Vector3(); model.object3D.getWorldPosition(p);
+          model.removeAttribute('gps-entity-place');
+          model.setAttribute('position', `${p.x} ${p.y} ${p.z}`);
+          locked = true;
+        }
+        openPlayer(pin);
+      });
+
+      wrap.appendChild(model);
+      rootEl.appendChild(wrap);
+      // appear now
+      wrap.setAttribute('visible','true'); wrap.emit('rc-appear');
+
+      active.set(pin.id, {wrap, model, locked:false});
+    }
+
+    function openPlayer(pin){
+      $('#title').textContent = pin.track_title || 'Untitled';
+      $('#artist').textContent = pin.track_artist || '';
+      const cover = $('#cover');
+      if (pin.cover_url) { cover.src = pin.cover_url; cover.style.display='block'; }
+      else { cover.style.display='none'; }
+      $('#player').style.display = 'block';
+
+      $('#play').onclick = ()=>{
+        if (pin.audio_url){ audio.src = pin.audio_url; audio.play().catch(()=>{}); }
+      };
+      $('#stop').onclick = ()=>{
+        audio.pause(); audio.currentTime = 0;
+      };
+    }
+
+    // Proximity loop: show up to 7 closest within radius; hide others
+    navigator.geolocation.watchPosition((pos)=>{
+      const {latitude, longitude, accuracy} = pos.coords;
+      const nearby = [];
+      for (const p of pins){
+        const d = hav(latitude, longitude, p.lat, p.lng);
+        if (d <= (p.radius_m||1.524) && (accuracy==null || accuracy<=ACC_OK)){
+          nearby.push({p, d});
+        } else {
+          ensureDespawn(p.id);
+        }
+      }
+      nearby.sort((a,b)=>a.d-b.d);
+      const show = nearby.slice(0, MAX_VISIBLE).map(x=>x.p.id);
+      pins.forEach(p=>{
+        if (show.includes(p.id)) ensureSpawn(p);
+        else ensureDespawn(p.id);
+      });
+      nearEl.textContent = `Near pins: ${nearby.length}`;
+    }, (e)=>{ statusEl.textContent='GPS error'; console.warn(e); }, {enableHighAccuracy:true, maximumAge:1000, timeout:10000});
+
+    // boot
+    loadPins();
+  </script>
+</body>
+</html>
