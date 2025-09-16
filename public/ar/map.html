@@ -104,14 +104,17 @@
     const PIN_RADIUS_M = 1.524;            // 5 ft
     const NO_OVERLAP_MIN = PIN_RADIUS_M*2; // ~10 ft center-to-center
 
+    // Where geo1.html lives (relative to THIS file)
+    const GEO_VIEWER_PATH = './geo1.html';
+
     const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
     const $ = s => document.querySelector(s);
 
-    // Desktop: make scroll zoom 5× less sensitive than before
+    // Gentler scroll zoom
     const map = L.map('map', {
       scrollWheelZoom: true,
-      wheelDebounceTime: 250,
-      wheelPxPerZoomLevel: 3000, // was 600
+      wheelDebounceTime: 300,
+      wheelPxPerZoomLevel: 3600, // much calmer than 600
       zoomSnap: 1,
       zoomDelta: 1
     }).setView([40.7719, -73.9462], 14);
@@ -144,13 +147,16 @@
       const draw = ({latitude, longitude, accuracy}) => {
         if (!meMarker) {
           meMarker = L.circleMarker([latitude, longitude], {radius:6,color:'#1982ff',fillColor:'#1982ff',fillOpacity:1,weight:2}).addTo(map);
-          meCircle = L.circle([latitude, longitude], {radius: Math.max(accuracy, 10), color:'#1982ff', opacity:.25, fillOpacity:.08}).addTo(map);
-          map.setView([latitude, longitude], Math.max(map.getZoom(), 16), {animate:true});
         } else {
           meMarker.setLatLng([latitude, longitude]);
+        }
+        if (!meCircle){
+          meCircle = L.circle([latitude, longitude], {radius: Math.max(accuracy, 10), color:'#1982ff', opacity:.25, fillOpacity:.08}).addTo(map);
+        } else {
           meCircle.setLatLng([latitude, longitude]);
           meCircle.setRadius(Math.max(accuracy, 10));
         }
+        map.setView([latitude, longitude], Math.max(map.getZoom(), 16), {animate:true});
         setStatus(`You: ${latitude.toFixed(6)}, ${longitude.toFixed(6)} (±${Math.round(accuracy)} m)`);
       };
       navigator.geolocation.getCurrentPosition(
@@ -188,20 +194,21 @@
       if (el2) el2.textContent = msg;
     }
 
-    // --- Build geo1 deep-link for a pin ---
+    // --- Build geo1 deep-link for a pin (directory-relative, no 404s) ---
     function buildGeoURL(p){
-      const base = new URL('geo1.html', location.origin);
-      base.searchParams.set('lat', p.lat.toFixed(6));
-      base.searchParams.set('lng', p.lng.toFixed(6));
-      base.searchParams.set('radius', (p.radius_m ?? PIN_RADIUS_M).toString());
-      if (p.track_title) base.searchParams.set('title', p.track_title);
-      if (p.model_url)  base.searchParams.set('glb',   p.model_url);
-      if (p.audio_url)  base.searchParams.set('audio', p.audio_url);
-      if (p.cover_url)  base.searchParams.set('cover', p.cover_url);
-      return base.toString();
+      const url = new URL(GEO_VIEWER_PATH, location.href);
+      url.searchParams.set('lat', Number(p.lat).toFixed(6));
+      url.searchParams.set('lng', Number(p.lng).toFixed(6));
+      url.searchParams.set('radius', (p.radius_m ?? PIN_RADIUS_M).toString());
+      if (p.track_title) url.searchParams.set('title', p.track_title);
+      // Pass media/model if present (absolute URLs recommended)
+      if (p.model_url)  url.searchParams.set('glb',   p.model_url);
+      if (p.audio_url)  url.searchParams.set('audio', p.audio_url);
+      if (p.cover_url)  url.searchParams.set('cover', p.cover_url);
+      return url.toString();
     }
 
-    // Load pins from DB
+    // Load pins
     async function loadPins(){
       const {data, error} = await sb.from('pins').select('*').order('created_at',{ascending:false});
       if(error){ setStatus('Load error: '+error.message); return; }
@@ -209,7 +216,7 @@
       renderPins();
     }
 
-    // Draw markers + side/drawer lists
+    // Render markers + lists
     function renderPins(){
       for (const [id, m] of state.markers.entries()){
         if (!state.pins.find(p=>p.id===id)) { map.removeLayer(m); state.markers.delete(id); }
@@ -244,7 +251,7 @@
           <div class="row">
             <input type="text" class="name" value="${p.name||''}" placeholder="Street · time" />
             <div style="display:flex;gap:6px;flex-wrap:wrap">
-              <button class="btn" data-find>Find</button>
+              <button class="btn gray" data-find>Find</button>
               <button class="btn save">Save</button>
               <button class="btn danger del">Delete</button>
             </div>
@@ -258,14 +265,13 @@
           <div class="meta muted">Drag the marker to adjust. Changes save when you hit <b>Save</b>.</div>
         `;
 
-        // FIND button → open geo1 with this pin’s params
+        // FIND → Open geo1 with this pin’s params
         row.querySelector('[data-find]').onclick = () => {
           const url = buildGeoURL(p);
-          // same tab for quick testing; switch to window.open(url, '_blank') if you want a new tab
-          location.href = url;
+          location.href = url; // or: window.open(url, '_blank');
         };
 
-        // SAVE button
+        // SAVE
         row.querySelector('.save').onclick = async () => {
           const patch = {
             name:         row.querySelector('.name').value,
@@ -279,13 +285,14 @@
           alert('Pin saved!');
         };
 
-        // DELETE button
+        // DELETE
         row.querySelector('.del').onclick = async ()=>{
           if (!confirm('Delete this pin?')) return;
           const {error} = await sb.from('pins').delete().eq('id', p.id);
           if(error) return alert(error.message);
           await loadPins();
         };
+
         return row;
       };
 
@@ -336,11 +343,11 @@
       setStatus('Saved.');
     }
 
-    // Topbar buttons
-    $('#openViewer').onclick = ()=> location.href = 'geo1.html';
+    // Topbar
+    $('#openViewer').onclick = ()=> location.href = GEO_VIEWER_PATH;
     $('#locateMe').onclick = snapToMyLocation;
 
-    // boot
+    // Boot
     loadPins();
   </script>
 </body>

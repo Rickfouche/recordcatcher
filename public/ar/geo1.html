@@ -20,6 +20,9 @@
     .blue{background:#0a84ff;color:#fff}
     .muted{opacity:.8}
 
+    /* Tiny direction arrow */
+    .arrow{font-size:28px;line-height:1;display:inline-block;transform:rotate(0deg);transition:transform .1s linear}
+
     /* Modal */
     .modal{position:fixed;inset:0;display:none;place-items:center;background:rgba(0,0,0,.6);backdrop-filter:blur(4px)}
     .card{background:#111;border:1px solid #222;border-radius:16px;padding:16px;max-width:420px;width:92vw;display:grid;gap:12px}
@@ -51,8 +54,12 @@
     <div class="pill" id="distance">—</div>
   </div>
   <div class="row">
-    <button class="btn blue" id="recenter">Recenter</button>
-    <a class="muted" id="openMaps" target="_blank" rel="noopener">Open in Maps</a>
+    <div class="pill" id="direction"><span class="arrow" id="arrow">➤</span> <span id="heading">—°</span></div>
+    <div style="display:flex;gap:8px">
+      <button class="btn blue" id="sensors">Enable Compass</button>
+      <button class="btn blue" id="recenter">Recenter</button>
+      <a class="muted" id="openMaps" target="_blank" rel="noopener">Open in Maps</a>
+    </div>
   </div>
 </div>
 
@@ -71,29 +78,45 @@
 </div>
 
 <script>
+/* -----------------------------
+   CONFIG / FLAGS
+----------------------------- */
+const STRICT_RANGE_TO_TAP = true; // require being within radius to open popup
+const DEFAULT_RADIUS_M = 15;      // used if radius not provided
+
+/* -----------------------------
+   URL / Supabase
+----------------------------- */
 const qs = new URLSearchParams(location.search);
 
-// --- Supabase (only if using drop_id) ---
+// Supabase only needed for ?drop_id=...
 const SUPABASE_URL  = 'https://YOUR-PROJECT.supabase.co'; // TODO
 const SUPABASE_ANON = 'YOUR-ANON-KEY';                    // TODO
-const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+const sb = (SUPABASE_URL.includes('YOUR-PROJECT')) ? null
+        : window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
 
-// --- Target state ---
+/* -----------------------------
+   State / Elements
+----------------------------- */
 let target = {
   id: null,
   lat: null, lng: null,
-  radius_m: 15,
+  radius_m: DEFAULT_RADIUS_M,
   title: 'Track',
   glb_url: null,
   audio_url: null,
   cover_url: null
 };
+let userPos = { lat:null, lng:null, acc:null };
+let compassHeading = 0; // 0..360 (0 = North)
 
-let userPos = { lat:null, lng:null };
 const elName = document.getElementById('name');
 const elDist = document.getElementById('distance');
 const elMaps = document.getElementById('openMaps');
 const elRec  = document.getElementById('recenter');
+const elSensors = document.getElementById('sensors');
+const elArrow= document.getElementById('arrow');
+const elHead = document.getElementById('heading');
 
 // Modal refs
 const modal   = document.getElementById('modal');
@@ -103,7 +126,9 @@ const mCover  = document.getElementById('mCover');
 const playBtn = document.getElementById('playBtn');
 const closeBtn= document.getElementById('close');
 
-// Utils
+/* -----------------------------
+   Utils
+----------------------------- */
 function toRad(d){ return d*Math.PI/180; }
 function haversine(lat1, lon1, lat2, lon2){
   if([lat1,lon1,lat2,lon2].some(v=>typeof v!=='number')) return NaN;
@@ -111,12 +136,23 @@ function haversine(lat1, lon1, lat2, lon2){
   const a=Math.sin(dLat/2)**2 + Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLon/2)**2;
   return 2*R*Math.asin(Math.sqrt(a));
 }
-function fmtMeters(m){ if(!isFinite(m)) return '—'; return m<1000? `${Math.round(m)} m` : `${(m/1000).toFixed(2)} km`; }
+function bearingBetween(lat1, lon1, lat2, lon2){
+  const φ1=toRad(lat1), φ2=toRad(lat2), λ1=toRad(lon1), λ2=toRad(lon2);
+  const y = Math.sin(λ2-λ1) * Math.cos(φ2);
+  const x = Math.cos(φ1)*Math.sin(φ2) - Math.sin(φ1)*Math.cos(φ2)*Math.cos(λ2-λ1);
+  return (Math.atan2(y, x)*180/Math.PI + 360) % 360; // deg
+}
+function fmtMeters(m){
+  if(!isFinite(m)) return '—';
+  return m<1000? `${Math.round(m)} m` : `${(m/1000).toFixed(2)} km`;
+}
 function mapsLink(lat,lng){ return `https://maps.apple.com/?daddr=${lat},${lng}`; }
 
+/* -----------------------------
+   Load target
+----------------------------- */
 async function loadTarget(){
-  // 1) If drop_id provided, fetch from Supabase
-  if(qs.has('drop_id')){
+  if(qs.has('drop_id') && sb){
     target.id = qs.get('drop_id');
     const { data, error } = await sb
       .from('drops')
@@ -125,7 +161,7 @@ async function loadTarget(){
       .maybeSingle();
     if(error || !data){ elName.textContent = 'Could not load drop.'; return; }
 
-    target.radius_m = data.radius_m || 15;
+    target.radius_m = Number(data.radius_m || DEFAULT_RADIUS_M);
     target.title    = data.record?.title || 'Track';
     target.audio_url= data.record?.audio_url || null;
     target.cover_url= data.record?.cover_url || null;
@@ -148,26 +184,29 @@ async function loadTarget(){
       }
     }
   } else {
-    // 2) Direct debug params
+    // Direct params (debug / from map Find button)
     target.lat      = parseFloat(qs.get('lat'));
     target.lng      = parseFloat(qs.get('lng'));
-    target.radius_m = parseFloat(qs.get('radius')) || 15;
+    target.radius_m = parseFloat(qs.get('radius')) || DEFAULT_RADIUS_M;
     target.title    = qs.get('title') || 'Track';
-    target.glb_url  = qs.get('glb')   || null;
-    target.audio_url= qs.get('audio') || null;
-    target.cover_url= qs.get('cover') || null;
+    // decodeURIComponent in case upstream forgot to encode
+    target.glb_url  = qs.get('glb')   ? decodeURIComponent(qs.get('glb'))   : null;
+    target.audio_url= qs.get('audio') ? decodeURIComponent(qs.get('audio')) : null;
+    target.cover_url= qs.get('cover') ? decodeURIComponent(qs.get('cover')) : null;
   }
 
   elName.textContent = target.title;
   if (target.lat && target.lng) elMaps.href = mapsLink(target.lat, target.lng);
 
-  spawnARModel(); // put the GLB at the target coordinate
+  spawnARModel();
 }
 
-// Place the GLB as a gps-entity-place. Tapping it opens the modal.
+/* -----------------------------
+   Spawn GLB
+----------------------------- */
 function spawnARModel(){
   const root = document.getElementById('dropEntity');
-  root.innerHTML = ''; // reset
+  root.innerHTML = '';
 
   if(!target.lat || !target.lng){
     elName.textContent = 'Missing coordinates.';
@@ -175,43 +214,97 @@ function spawnARModel(){
   }
   const container = document.createElement('a-entity');
   container.setAttribute('gps-entity-place', `latitude: ${target.lat}; longitude: ${target.lng};`);
-  container.setAttribute('look-at', '[gps-camera]'); // face the user a bit
+  container.setAttribute('look-at', '[gps-camera]');
 
   const model = document.createElement('a-entity');
   if (target.glb_url){
     model.setAttribute('gltf-model', target.glb_url);
   } else {
-    // Fallback: simple geometry if GLB not provided
+    // fallback shape if no GLB provided
     model.setAttribute('geometry', 'primitive: box; depth: 0.2; height: 0.2; width: 0.2');
     model.setAttribute('material', 'color: #4af');
   }
-  // Scale & elevate a bit so it "floats"
-  model.setAttribute('scale', '1 1 1');    // adjust as needed
-  model.setAttribute('position', '0 1 0'); // 1m above ground
+  model.setAttribute('scale', '1 1 1');
+  model.setAttribute('position', '0 1 0'); // ~1m high
   model.setAttribute('shadow', 'cast: true; receive: false');
 
-  // Tap handler: open modal (manual play)
+  // Manual, intentional interaction — only open if in-range (if STRICT on)
   model.addEventListener('click', () => {
+    const d = haversine(userPos.lat, userPos.lng, target.lat, target.lng);
+    const inRange = d <= (target.radius_m || DEFAULT_RADIUS_M);
+    if (STRICT_RANGE_TO_TAP && !inRange){
+      // gentle nudge
+      const msg = document.createElement('div');
+      msg.style.cssText='position:fixed;left:50%;bottom:86px;transform:translateX(-50%);background:#111;border:1px solid #333;border-radius:12px;padding:8px 12px;color:#fff;z-index:10000';
+      msg.textContent = `Move closer to unlock · ${fmtMeters(d)}`;
+      document.body.appendChild(msg);
+      setTimeout(()=>msg.remove(), 1400);
+      return;
+    }
     openModal();
+  });
+
+  // Optional: basic load/error hooks
+  model.addEventListener('model-error', () => {
+    elName.textContent = 'Model failed to load (check URL / CORS).';
   });
 
   container.appendChild(model);
   root.appendChild(container);
 }
 
-// Device position watcher → update distance text only (no auto actions)
+/* -----------------------------
+   Sensors / Distance / Bearing
+----------------------------- */
 function startDistanceWatch(){
   if(!navigator.geolocation) return;
   navigator.geolocation.watchPosition((pos)=>{
     userPos.lat = pos.coords.latitude;
     userPos.lng = pos.coords.longitude;
+    userPos.acc = typeof pos.coords.accuracy === 'number' ? Math.round(pos.coords.accuracy) : null;
     const d = haversine(userPos.lat, userPos.lng, target.lat, target.lng);
-    elDist.textContent = d <= target.radius_m ? `In range (${fmtMeters(d)})` : fmtMeters(d);
+    elDist.textContent = d <= target.radius_m
+      ? `In range (${fmtMeters(d)})${userPos.acc? ' · ±'+userPos.acc+'m':''}`
+      : `${fmtMeters(d)}${userPos.acc? ' · ±'+userPos.acc+'m':''}`;
     elDist.classList.toggle('ok', d <= target.radius_m);
+
+    // live bearing → rotate arrow toward target
+    if (isFinite(d) && isFinite(compassHeading)){
+      const brgTo = bearingBetween(userPos.lat, userPos.lng, target.lat, target.lng);
+      const rel = (brgTo - compassHeading + 360) % 360;
+      elArrow.style.transform = `rotate(${rel}deg)`;
+    }
   }, ()=>{}, { enableHighAccuracy:true, maximumAge:1000, timeout:15000 });
 }
 
-// Modal logic
+// iOS 13+ requires explicit permission for compass
+async function requestCompassPermissionIfNeeded(){
+  try{
+    const need = typeof DeviceOrientationEvent !== 'undefined' &&
+                 typeof DeviceOrientationEvent.requestPermission === 'function';
+    if (need){
+      const res = await DeviceOrientationEvent.requestPermission();
+      return res === 'granted';
+    }
+    return true;
+  }catch{ return false; }
+}
+
+function startCompass(){
+  window.addEventListener('deviceorientation', (e)=>{
+    const webkit = e.webkitCompassHeading;
+    if (typeof webkit === 'number'){
+      compassHeading = webkit; // 0 = North
+    } else if (typeof e.alpha === 'number'){
+      compassHeading = (360 - e.alpha) % 360; // approx
+    }
+    elHead.textContent = `${Math.round((compassHeading+360)%360)}°`;
+  }, true);
+}
+
+/* -----------------------------
+   Modal
+----------------------------- */
 function openModal(){
   mTitle.textContent = target.title || 'Track';
   if (target.cover_url){
@@ -237,11 +330,20 @@ playBtn.addEventListener('click', ()=> mAudio.play());
 closeBtn.addEventListener('click', closeModal);
 modal.addEventListener('click', (e)=>{ if(e.target===modal) closeModal(); });
 
+/* -----------------------------
+   UI buttons
+----------------------------- */
 document.getElementById('recenter').addEventListener('click', ()=>{
-  // A-Frame viewport recenter hint: just prompt user to move device; AR.js reprojects.
   alert('Recenter: move your phone in a small figure-8 to recalibrate. The record is at the target GPS point.');
 });
+elSensors.addEventListener('click', async ()=>{
+  const ok = await requestCompassPermissionIfNeeded();
+  if (ok) { startCompass(); elSensors.disabled = true; elSensors.textContent = 'Compass On'; }
+});
 
+/* -----------------------------
+   Boot
+----------------------------- */
 loadTarget();
 startDistanceWatch();
 </script>
