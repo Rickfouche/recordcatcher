@@ -34,7 +34,10 @@
       <header>
         <div style="display:flex;gap:8px;align-items:center;justify-content:space-between">
           <strong>Pin Maker</strong>
-          <button class="btn" id="openViewer">Open Viewer</button>
+          <div style="display:flex;gap:8px">
+            <button class="btn" id="locateMe">My Location</button>
+            <button class="btn" id="openViewer">Open Viewer</button>
+          </div>
         </div>
       </header>
       <div class="list" id="pinList"></div>
@@ -52,8 +55,8 @@
     const SUPABASE_URL = 'https://YOUR-PROJECT.supabase.co';
     const SUPABASE_ANON_KEY = 'YOUR-ANON-KEY';
     const DEFAULT_GLB = 'https://recordcatcher.b-cdn.net/glb/Nderec.glb';
-    const PIN_RADIUS_M = 1.524;          // 5 ft in meters
-    const NO_OVERLAP_MIN = PIN_RADIUS_M*2; // >= 3.048 m center-to-center
+    const PIN_RADIUS_M = 1.524;            // 5 ft
+    const NO_OVERLAP_MIN = PIN_RADIUS_M*2; // ~10 ft center-to-center
 
     const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
     const $ = s => document.querySelector(s);
@@ -62,6 +65,36 @@
     L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OSM'}).addTo(map);
 
     const state = { pins:[], markers:new Map() };
+
+    // --- "My Location" temp layers (not saved) ---
+    let meMarker = null, meCircle = null;
+    function clearMeLayers(){
+      if (meMarker){ map.removeLayer(meMarker); meMarker = null; }
+      if (meCircle){ map.removeLayer(meCircle); meCircle = null; }
+    }
+    function snapToMyLocation(){
+      $('#status').textContent = 'Locating…';
+      navigator.geolocation.getCurrentPosition(
+        pos => {
+          const {latitude, longitude, accuracy} = pos.coords;
+          clearMeLayers();
+          meMarker = L.circleMarker([latitude, longitude], {
+            radius: 6, color:'#1982ff', fillColor:'#1982ff', fillOpacity:1, weight:2
+          }).addTo(map);
+          meCircle = L.circle([latitude, longitude], {radius: Math.max(accuracy, 10), color:'#1982ff', opacity:.25, fillOpacity:.08}).addTo(map);
+          map.setView([latitude, longitude], Math.max(map.getZoom(), 16), {animate:true});
+          $('#status').textContent = `Centered to your location (${accuracy|0} m acc).`;
+        },
+        err => {
+          const msg = err.code===1 ? 'Location permission denied.' :
+                      err.code===2 ? 'Position unavailable.' :
+                      err.code===3 ? 'Location timeout.' : 'Location error.';
+          $('#status').textContent = msg;
+          console.warn('geolocation error', err);
+        },
+        { enableHighAccuracy:true, timeout:10000, maximumAge:2000 }
+      );
+    }
 
     function fmt(v){ return Number(v).toFixed(6); }
     function distMeters(aLat,aLng,bLat,bLng){
@@ -81,7 +114,7 @@
 
     // Draw markers + sidebar
     function renderPins(){
-      // clear markers not present
+      // remove missing
       for (const [id, m] of state.markers.entries()){
         if (!state.pins.find(p=>p.id===id)) { map.removeLayer(m); state.markers.delete(id); }
       }
@@ -92,7 +125,6 @@
           marker.on('dragend', async (e)=>{
             const ll = e.target.getLatLng();
             if (wouldOverlap(ll.lat, ll.lng, p.id)) {
-              // revert
               e.target.setLatLng([p.lat,p.lng]);
               alert('Too close to another pin (5-ft radius cannot overlap).');
             } else {
@@ -116,7 +148,7 @@
             <input type="text" class="name" value="${p.name||''}" placeholder="Street · time" />
             <button class="btn danger del">Delete</button>
           </div>
-          <div class="meta">${fmt(p.lat)}, ${fmt(p.lng)} · radius ${p.radius_m?.toFixed(2)||PIN_RADIUS_M} m</div>
+          <div class="meta">${fmt(p.lat)}, ${fmt(p.lng)} · radius ${(p.radius_m??PIN_RADIUS_M).toFixed(2)} m</div>
           <div class="row"><input type="text" class="title" placeholder="Track title" value="${p.track_title||''}"></div>
           <div class="row"><input type="text" class="artist" placeholder="Artist" value="${p.track_artist||''}"></div>
           <div class="row"><input type="text" class="cover" placeholder="Cover URL (optional)" value="${p.cover_url||''}"></div>
@@ -154,7 +186,7 @@
     map.on('click', async (e)=>{
       const {lat,lng} = e.latlng;
       if (wouldOverlap(lat,lng)) {
-        $('#status').textContent = 'Too close to an existing pin (needs ≥ 10 ft center-to-center).';
+        $('#status').textContent = 'Too close to an existing pin (needs ≥ ~10 ft center-to-center).';
         return;
       }
       const name = autoName(lat,lng);
@@ -171,21 +203,20 @@
     function autoName(lat,lng){
       const now = new Date();
       const hh = now.getHours()%12 || 12, mm = String(now.getMinutes()).padStart(2,'0');
-      // you can swap to reverse geocode later; for now embed rough coords
-      return `Pin ${fmt(lat)},${fmt(lng)} · ${hh}:${mm}`;
+      return `Pin ${Number(lat).toFixed(6)},${Number(lng).toFixed(6)} · ${hh}:${mm}`;
     }
 
     async function updatePin(id, patch){
       const {error} = await sb.from('pins').update(patch).eq('id', id);
       if(error){ alert(error.message); return; }
-      // mirror in local state
       const p = state.pins.find(x=>x.id===id);
       Object.assign(p, patch);
       renderPins();
     }
 
-    // Open viewer
+    // Buttons
     $('#openViewer').onclick = ()=> location.href = 'geo1.html';
+    $('#locateMe').onclick = snapToMyLocation;
 
     // boot
     loadPins();
