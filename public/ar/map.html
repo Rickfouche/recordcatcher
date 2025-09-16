@@ -23,12 +23,13 @@
     footer{border-top:1px solid var(--line);border-bottom:0}
     .btn{background:var(--accent);color:#fff;border:0;border-radius:10px;padding:10px 12px;font-weight:700;cursor:pointer}
     .btn.ghost{background:#222}
+    .btn.save{background:#34c759;color:#000}
+    .btn.danger{background:#ff3b30}
     .list{overflow:auto}
     .pin{padding:10px;border-bottom:1px solid var(--line);display:grid;gap:6px}
     .row{display:grid;grid-template-columns:1fr auto;gap:6px;align-items:center}
     input[type="text"]{width:100%;padding:10px;border-radius:10px;border:1px solid #333;background:#0e0e0e;color:#fff}
     .meta{opacity:.8;font-size:12px}
-    .danger{background:#ff3b30}
     .muted{opacity:.8}
     .note{padding:8px 10px;background:#0e0e0e;border-top:1px solid var(--line)}
 
@@ -129,13 +130,13 @@
     const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
     const $ = s => document.querySelector(s);
 
-    // Desktop: strict 1-step-per-nudge; Mobile pinch unaffected
+    // Desktop: very gentle wheel (≈2x less sensitive) & strict 1 step per nudge
     const map = L.map('map', {
       scrollWheelZoom: true,
-      wheelDebounceTime: 120,   // group rapid wheel events
-      wheelPxPerZoomLevel: 300, // more movement needed to trigger zoom
-      zoomSnap: 1,              // whole-number zoom levels
-      zoomDelta: 1              // each wheel event = ±1 level
+      wheelDebounceTime: 200,
+      wheelPxPerZoomLevel: 600,
+      zoomSnap: 1,
+      zoomDelta: 1
     }).setView([40.7719, -73.9462], 14);
 
     L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -256,23 +257,33 @@
         row.innerHTML = `
           <div class="row">
             <input type="text" class="name" value="${p.name||''}" placeholder="Street · time" />
-            <button class="btn danger del">Delete</button>
+            <div style="display:flex;gap:6px">
+              <button class="btn save">Save</button>
+              <button class="btn danger del">Delete</button>
+            </div>
           </div>
           <div class="meta">${fmt(p.lat)}, ${fmt(p.lng)} · radius ${(p.radius_m??PIN_RADIUS_M).toFixed(2)} m</div>
-          <div class="row"><input type="text" class="title" placeholder="Track title" value="${p.track_title||''}"></div>
-          <div class="row"><input type="text" class="artist" placeholder="Artist" value="${p.track_artist||''}"></div>
-          <div class="row"><input type="text" class="cover" placeholder="Cover URL (optional)" value="${p.cover_url||''}"></div>
-          <div class="row"><input type="text" class="audio" placeholder="Audio URL (Bunny)" value="${p.audio_url||''}"></div>
-          <div class="row"><input type="text" class="model" placeholder="Model URL (GLB optional)" value="${p.model_url||''}"></div>
-          <div class="meta muted">Drag the marker to adjust. Changes save instantly.</div>
+          <div class="row"><input type="text" class="title"  placeholder="Track title"               value="${p.track_title||''}"></div>
+          <div class="row"><input type="text" class="artist" placeholder="Artist"                    value="${p.track_artist||''}"></div>
+          <div class="row"><input type="text" class="cover"  placeholder="Cover URL (optional)"      value="${p.cover_url||''}"></div>
+          <div class="row"><input type="text" class="audio"  placeholder="Audio URL (Bunny)"         value="${p.audio_url||''}"></div>
+          <div class="row"><input type="text" class="model"  placeholder="Model URL (GLB optional)"  value="${p.model_url||''}"></div>
+          <div class="meta muted">Drag the marker to adjust. Changes save when you hit <b>Save</b>.</div>
         `;
-        // handlers (save on blur/change to avoid typing lag on mobile)
-        row.querySelector('.name').onchange   = e => updatePin(p.id, {name: e.target.value});
-        row.querySelector('.title').onchange  = e => updatePin(p.id, {track_title: e.target.value});
-        row.querySelector('.artist').onchange = e => updatePin(p.id, {track_artist: e.target.value});
-        row.querySelector('.cover').onchange  = e => updatePin(p.id, {cover_url: e.target.value});
-        row.querySelector('.audio').onchange  = e => updatePin(p.id, {audio_url: e.target.value});
-        row.querySelector('.model').onchange  = e => updatePin(p.id, {model_url: e.target.value});
+        // SAVE button (explicit commit)
+        row.querySelector('.save').onclick = async () => {
+          const patch = {
+            name:        row.querySelector('.name').value,
+            track_title: row.querySelector('.title').value,
+            track_artist:row.querySelector('.artist').value,
+            cover_url:   row.querySelector('.cover').value,
+            audio_url:   row.querySelector('.audio').value,
+            model_url:   row.querySelector('.model').value
+          };
+          await updatePin(p.id, patch);
+          alert('Pin saved!');
+        };
+        // DELETE button
         row.querySelector('.del').onclick = async ()=>{
           if (!confirm('Delete this pin?')) return;
           const {error} = await sb.from('pins').delete().eq('id', p.id);
@@ -282,10 +293,10 @@
         return row;
       };
 
+      // build fresh nodes for each list so handlers are unique
       state.pins.forEach(p=>{
-        const row = buildRow(p);
-        if (desktop) desktop.appendChild(row.cloneNode(true)); // desktop list
-        if (mobile)  mobile.appendChild(buildRow(p));          // mobile list (fresh handlers)
+        if (desktop) desktop.appendChild(buildRow(p));
+        if (mobile)  mobile.appendChild(buildRow(p));
       });
     }
 
@@ -298,13 +309,16 @@
       });
     }
 
-    // Add pin on map click
+    // Add pin on map click (with confirm)
     map.on('click', async (e)=>{
       const {lat,lng} = e.latlng;
       if (wouldOverlap(lat,lng)) {
         setStatus('Too close to an existing pin (needs ≥ ~10 ft center-to-center).');
         return;
       }
+      const ok = confirm(`Add a pin here?\n${lat.toFixed(6)}, ${lng.toFixed(6)}`);
+      if (!ok) return;
+
       const name = autoName(lat,lng);
       const {data, error} = await sb.from('pins').insert({
         name, lat, lng, radius_m: PIN_RADIUS_M,
@@ -324,11 +338,15 @@
     }
 
     async function updatePin(id, patch){
-      const {error} = await sb.from('pins').update(patch).eq('id', id);
-      if(error){ alert(error.message); return; }
-      const p = state.pins.find(x=>x.id===id);
-      Object.assign(p, patch);
+      const {data, error} = await sb.from('pins').update(patch).eq('id', id).select().single();
+      if(error){
+        alert('Save failed: ' + error.message);
+        return;
+      }
+      const idx = state.pins.findIndex(x=>x.id===id);
+      if (idx >= 0) state.pins[idx] = {...state.pins[idx], ...(data || patch)};
       renderPins();
+      setStatus('Saved.');
     }
 
     // Buttons
