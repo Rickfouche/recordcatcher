@@ -1,152 +1,249 @@
 <!doctype html>
-<html lang="en">
+<html>
 <head>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>RecordCatcher — Geo1 Viewer</title>
+  <title>RecordCatcher — Finder Mode</title>
+
+  <!-- A-Frame + AR.js (geo) -->
   <script src="https://aframe.io/releases/1.2.0/aframe.min.js"></script>
-  <script src="https://raw.githack.com/AR-js-org/AR.js/3.3.3/aframe/build/aframe-ar-nft.js"></script>
+  <script src="https://raw.githack.com/AR-js-org/AR.js/3.4.5/aframe/build/aframe-ar-nft.js"></script>
+  <!-- Supabase (only to load a drop by id) -->
   <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+
   <style>
-    html,body{margin:0;height:100%;background:#000;overflow:hidden;font:14px system-ui;color:#fff}
-    #hud{position:fixed;top:10px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.6);
-      padding:8px 12px;border-radius:10px;z-index:10;text-align:center}
-    #player{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);z-index:12;
-      background:rgba(0,0,0,.8);padding:10px 12px;border:1px solid #222;border-radius:12px;display:none;min-width:260px}
-    #player .row{display:flex;align-items:center;gap:8px}
-    #player img{width:44px;height:44px;object-fit:cover;border-radius:6px;border:1px solid #222}
-    .btn{background:#0a84ff;color:#fff;border:0;border-radius:10px;padding:8px 12px;font-weight:700;cursor:pointer}
-    .btn.flat{background:#222}
+    html,body{margin:0;height:100%;background:#000;color:#fff;font:15px system-ui}
+    .hud{position:fixed;inset:auto 0 0 0;display:grid;gap:8px;padding:10px;background:linear-gradient(180deg,transparent,rgba(0,0,0,.6) 20%,rgba(0,0,0,.8))}
+    .row{display:flex;align-items:center;justify-content:space-between;gap:10px}
+    .pill{background:#111;border:1px solid #222;border-radius:999px;padding:8px 12px;opacity:.9}
+    .ok{color:#0f0}
+    .btn{padding:10px 14px;border:0;border-radius:12px;font-weight:700;cursor:pointer}
+    .blue{background:#0a84ff;color:#fff}
+    .muted{opacity:.8}
+
+    /* Modal */
+    .modal{position:fixed;inset:0;display:none;place-items:center;background:rgba(0,0,0,.6);backdrop-filter:blur(4px)}
+    .card{background:#111;border:1px solid #222;border-radius:16px;padding:16px;max-width:420px;width:92vw;display:grid;gap:12px}
+    .cover{width:100%;height:auto;border-radius:12px;border:1px solid #222;object-fit:cover;background:#000}
+    .title{font-weight:800;font-size:18px}
+    .rowc{display:flex;gap:10px;align-items:center;justify-content:space-between}
   </style>
 </head>
 <body>
-  <div id="hud"><span id="status">Loading…</span> · <span id="near">Near pins: 0</span></div>
-  <div id="player">
-    <div class="row">
-      <img id="cover" alt="">
-      <div style="flex:1">
-        <div id="title" style="font-weight:700"></div>
-        <div id="artist" style="opacity:.8"></div>
-      </div>
-      <button id="play" class="btn">Play</button>
-      <button id="stop" class="btn flat">Stop</button>
-    </div>
+
+<!-- AR Scene -->
+<a-scene
+  vr-mode-ui="enabled:false"
+  renderer="antialias:true; alpha:true"
+  embedded
+  arjs="sourceType: webcam; videoTexture: true; debugUIEnabled: false; trackingMethod: best; gpsMinDistance: 1;"
+>
+  <!-- Camera with GPS -->
+  <a-camera gps-camera rotation-reader></a-camera>
+
+  <!-- The record model (inserted dynamically once target loads) -->
+  <a-entity id="dropEntity"></a-entity>
+</a-scene>
+
+<!-- HUD -->
+<div class="hud">
+  <div class="row">
+    <div class="pill" id="name">Loading…</div>
+    <div class="pill" id="distance">—</div>
   </div>
+  <div class="row">
+    <button class="btn blue" id="recenter">Recenter</button>
+    <a class="muted" id="openMaps" target="_blank" rel="noopener">Open in Maps</a>
+  </div>
+</div>
 
-  <a-scene vr-mode-ui="enabled:false" renderer="antialias:true; alpha:true" embedded
-           arjs="sourceType: webcam; videoTexture: true; debugUIEnabled: false; trackingMethod: best;">
-    <a-camera gps-camera id="gpsCam"></a-camera>
-    <a-entity id="spawnRoot"></a-entity>
-  </a-scene>
+<!-- Modal -->
+<div class="modal" id="modal">
+  <div class="card">
+    <div class="title" id="mTitle">Track</div>
+    <img id="mCover" class="cover" alt="" style="display:none" />
+    <audio id="mAudio" controls preload="none" style="width:100%"></audio>
+    <div class="rowc">
+      <button class="btn" id="close">Close</button>
+      <button class="btn blue" id="playBtn">Play</button>
+    </div>
+    <div class="muted" id="mHint">Tap Play to start audio.</div>
+  </div>
+</div>
 
-  <script>
-    // === CONFIG ===
-    const SUPABASE_URL = 'https://rlejpxhkftihlchklwub.supabase.co';
-    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJsZWpweGhrZnRpaGxjaGtsd3ViIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTcxMDUyMDIsImV4cCI6MjA3MjY4MTIwMn0.CBunws9Ge-zi858JS7LBen6fTYV_0fZ1__D2VdjTDtM';
-    const DEFAULT_GLB = 'https://recordcatcher.b-cdn.net/glb/Nderec.glb';
-    const ACC_OK = 60;            // m
-    const MAX_VISIBLE = 7;
+<script>
+const qs = new URLSearchParams(location.search);
 
-    const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-    const $ = s=>document.querySelector(s);
-    const statusEl=$('#status'), nearEl=$('#near'), rootEl=$('#spawnRoot');
+// --- Supabase (only if using drop_id) ---
+const SUPABASE_URL  = 'https://YOUR-PROJECT.supabase.co'; // TODO
+const SUPABASE_ANON = 'YOUR-ANON-KEY';                    // TODO
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
 
-    // util
-    const hav=(a,b,c,d)=>{const R=6371000,rad=x=>x*Math.PI/180;const dLat=rad(c-a),dLon=rad(d-b);
-      const A=Math.sin(dLat/2)**2 + Math.cos(rad(a))*Math.cos(rad(c))*Math.sin(dLon/2)**2;
-      return 2*R*Math.asin(Math.sqrt(A));};
+// --- Target state ---
+let target = {
+  id: null,
+  lat: null, lng: null,
+  radius_m: 15,
+  title: 'Track',
+  glb_url: null,
+  audio_url: null,
+  cover_url: null
+};
 
-    let pins=[];
-    let audio = new Audio(); audio.preload='metadata';
+let userPos = { lat:null, lng:null };
+const elName = document.getElementById('name');
+const elDist = document.getElementById('distance');
+const elMaps = document.getElementById('openMaps');
+const elRec  = document.getElementById('recenter');
 
-    async function loadPins(){
-      const {data,error}=await sb.from('pins').select('*');
-      if(error){ statusEl.textContent='Load error: '+error.message; return; }
-      pins = data||[];
-      statusEl.textContent = `Loaded ${pins.length} pins. Walk toward one.`;
+// Modal refs
+const modal   = document.getElementById('modal');
+const mTitle  = document.getElementById('mTitle');
+const mAudio  = document.getElementById('mAudio');
+const mCover  = document.getElementById('mCover');
+const playBtn = document.getElementById('playBtn');
+const closeBtn= document.getElementById('close');
+
+// Utils
+function toRad(d){ return d*Math.PI/180; }
+function haversine(lat1, lon1, lat2, lon2){
+  if([lat1,lon1,lat2,lon2].some(v=>typeof v!=='number')) return NaN;
+  const R=6371000,dLat=toRad(lat2-lat1),dLon=toRad(lon2-lon1);
+  const a=Math.sin(dLat/2)**2 + Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLon/2)**2;
+  return 2*R*Math.asin(Math.sqrt(a));
+}
+function fmtMeters(m){ if(!isFinite(m)) return '—'; return m<1000? `${Math.round(m)} m` : `${(m/1000).toFixed(2)} km`; }
+function mapsLink(lat,lng){ return `https://maps.apple.com/?daddr=${lat},${lng}`; }
+
+async function loadTarget(){
+  // 1) If drop_id provided, fetch from Supabase
+  if(qs.has('drop_id')){
+    target.id = qs.get('drop_id');
+    const { data, error } = await sb
+      .from('drops')
+      .select('id, radius_m, raw_point, capture_zone, record:record_id(title, audio_url, cover_url, glb_url)')
+      .eq('id', target.id)
+      .maybeSingle();
+    if(error || !data){ elName.textContent = 'Could not load drop.'; return; }
+
+    target.radius_m = data.radius_m || 15;
+    target.title    = data.record?.title || 'Track';
+    target.audio_url= data.record?.audio_url || null;
+    target.cover_url= data.record?.cover_url || null;
+    target.glb_url  = data.record?.glb_url   || null;
+
+    // Prefer polygon centroid if present
+    if (data.capture_zone?.coordinates?.[0]?.length){
+      const ring = data.capture_zone.coordinates[0];
+      const avg = ring.reduce((acc,[lng,lat])=>({lat:acc.lat+lat, lng:acc.lng+lng}), {lat:0,lng:0});
+      target.lat = avg.lat / ring.length;
+      target.lng = avg.lng / ring.length;
     }
-
-    // Spawn/Despawn controller
-    const active = new Map(); // pinId -> {wrap, model, locked}
-    function ensureDespawn(id){
-      const node = active.get(id);
-      if (!node) return;
-      node.wrap.emit('rc-disappear'); setTimeout(()=>node.wrap.parentNode.removeChild(node.wrap),300);
-      active.delete(id);
-    }
-    function ensureSpawn(pin){
-      if (active.has(pin.id)) return;
-      // wrap with appear/disappear + tap-to-lock
-      const wrap = document.createElement('a-entity');
-      wrap.setAttribute('visible','false');
-      wrap.setAttribute('scale','0.001 0.001 0.001');
-      wrap.setAttribute('animation__appear','property: scale; to: 1 1 1; dur: 320; easing: easeOutQuad; startEvents: rc-appear');
-      wrap.setAttribute('animation__disappear','property: scale; to: 0.001 0.001 0.001; dur: 300; easing: easeInQuad; startEvents: rc-disappear');
-
-      const model = document.createElement('a-entity');
-      model.setAttribute('gltf-model', `url(${pin.model_url||DEFAULT_GLB})`);
-      model.setAttribute('gps-entity-place', `latitude:${pin.lat}; longitude:${pin.lng};`);
-      model.setAttribute('scale','8 8 8');
-      model.setAttribute('animation__spin','property: rotation; to: 0 360 0; loop: true; dur: 8000; autoplay: true');
-
-      // tap to lock (stops following) + open player
-      let locked=false;
-      model.addEventListener('click', ()=>{
-        if (!locked){
-          const p = new THREE.Vector3(); model.object3D.getWorldPosition(p);
-          model.removeAttribute('gps-entity-place');
-          model.setAttribute('position', `${p.x} ${p.y} ${p.z}`);
-          locked = true;
-        }
-        openPlayer(pin);
-      });
-
-      wrap.appendChild(model);
-      rootEl.appendChild(wrap);
-      // appear now
-      wrap.setAttribute('visible','true'); wrap.emit('rc-appear');
-
-      active.set(pin.id, {wrap, model, locked:false});
-    }
-
-    function openPlayer(pin){
-      $('#title').textContent = pin.track_title || 'Untitled';
-      $('#artist').textContent = pin.track_artist || '';
-      const cover = $('#cover');
-      if (pin.cover_url) { cover.src = pin.cover_url; cover.style.display='block'; }
-      else { cover.style.display='none'; }
-      $('#player').style.display = 'block';
-
-      $('#play').onclick = ()=>{
-        if (pin.audio_url){ audio.src = pin.audio_url; audio.play().catch(()=>{}); }
-      };
-      $('#stop').onclick = ()=>{
-        audio.pause(); audio.currentTime = 0;
-      };
-    }
-
-    // Proximity loop: show up to 7 closest within radius; hide others
-    navigator.geolocation.watchPosition((pos)=>{
-      const {latitude, longitude, accuracy} = pos.coords;
-      const nearby = [];
-      for (const p of pins){
-        const d = hav(latitude, longitude, p.lat, p.lng);
-        if (d <= (p.radius_m||1.524) && (accuracy==null || accuracy<=ACC_OK)){
-          nearby.push({p, d});
-        } else {
-          ensureDespawn(p.id);
-        }
+    // Fallback to raw_point
+    if ((!target.lat||!target.lng) && data.raw_point){
+      if (typeof data.raw_point === 'string' && data.raw_point.startsWith('POINT')){
+        const nums = data.raw_point.match(/-?\d+(\.\d+)?/g)?.map(Number) || [];
+        target.lng = nums[0]; target.lat = nums[1];
+      } else if (data.raw_point.lat && data.raw_point.lng){
+        target.lat = data.raw_point.lat; target.lng = data.raw_point.lng;
       }
-      nearby.sort((a,b)=>a.d-b.d);
-      const show = nearby.slice(0, MAX_VISIBLE).map(x=>x.p.id);
-      pins.forEach(p=>{
-        if (show.includes(p.id)) ensureSpawn(p);
-        else ensureDespawn(p.id);
-      });
-      nearEl.textContent = `Near pins: ${nearby.length}`;
-    }, (e)=>{ statusEl.textContent='GPS error'; console.warn(e); }, {enableHighAccuracy:true, maximumAge:1000, timeout:10000});
+    }
+  } else {
+    // 2) Direct debug params
+    target.lat      = parseFloat(qs.get('lat'));
+    target.lng      = parseFloat(qs.get('lng'));
+    target.radius_m = parseFloat(qs.get('radius')) || 15;
+    target.title    = qs.get('title') || 'Track';
+    target.glb_url  = qs.get('glb')   || null;
+    target.audio_url= qs.get('audio') || null;
+    target.cover_url= qs.get('cover') || null;
+  }
 
-    // boot
-    loadPins();
-  </script>
+  elName.textContent = target.title;
+  if (target.lat && target.lng) elMaps.href = mapsLink(target.lat, target.lng);
+
+  spawnARModel(); // put the GLB at the target coordinate
+}
+
+// Place the GLB as a gps-entity-place. Tapping it opens the modal.
+function spawnARModel(){
+  const root = document.getElementById('dropEntity');
+  root.innerHTML = ''; // reset
+
+  if(!target.lat || !target.lng){
+    elName.textContent = 'Missing coordinates.';
+    return;
+  }
+  const container = document.createElement('a-entity');
+  container.setAttribute('gps-entity-place', `latitude: ${target.lat}; longitude: ${target.lng};`);
+  container.setAttribute('look-at', '[gps-camera]'); // face the user a bit
+
+  const model = document.createElement('a-entity');
+  if (target.glb_url){
+    model.setAttribute('gltf-model', target.glb_url);
+  } else {
+    // Fallback: simple geometry if GLB not provided
+    model.setAttribute('geometry', 'primitive: box; depth: 0.2; height: 0.2; width: 0.2');
+    model.setAttribute('material', 'color: #4af');
+  }
+  // Scale & elevate a bit so it "floats"
+  model.setAttribute('scale', '1 1 1');    // adjust as needed
+  model.setAttribute('position', '0 1 0'); // 1m above ground
+  model.setAttribute('shadow', 'cast: true; receive: false');
+
+  // Tap handler: open modal (manual play)
+  model.addEventListener('click', () => {
+    openModal();
+  });
+
+  container.appendChild(model);
+  root.appendChild(container);
+}
+
+// Device position watcher → update distance text only (no auto actions)
+function startDistanceWatch(){
+  if(!navigator.geolocation) return;
+  navigator.geolocation.watchPosition((pos)=>{
+    userPos.lat = pos.coords.latitude;
+    userPos.lng = pos.coords.longitude;
+    const d = haversine(userPos.lat, userPos.lng, target.lat, target.lng);
+    elDist.textContent = d <= target.radius_m ? `In range (${fmtMeters(d)})` : fmtMeters(d);
+    elDist.classList.toggle('ok', d <= target.radius_m);
+  }, ()=>{}, { enableHighAccuracy:true, maximumAge:1000, timeout:15000 });
+}
+
+// Modal logic
+function openModal(){
+  mTitle.textContent = target.title || 'Track';
+  if (target.cover_url){
+    mCover.src = target.cover_url;
+    mCover.style.display = 'block';
+  } else {
+    mCover.style.display = 'none';
+  }
+  if (target.audio_url){
+    mAudio.src = target.audio_url;
+    playBtn.disabled = false;
+  } else {
+    mAudio.removeAttribute('src');
+    playBtn.disabled = true;
+  }
+  modal.style.display = 'grid';
+}
+function closeModal(){
+  modal.style.display = 'none';
+  mAudio.pause();
+}
+playBtn.addEventListener('click', ()=> mAudio.play());
+closeBtn.addEventListener('click', closeModal);
+modal.addEventListener('click', (e)=>{ if(e.target===modal) closeModal(); });
+
+document.getElementById('recenter').addEventListener('click', ()=>{
+  // A-Frame viewport recenter hint: just prompt user to move device; AR.js reprojects.
+  alert('Recenter: move your phone in a small figure-8 to recalibrate. The record is at the target GPS point.');
+});
+
+loadTarget();
+startDistanceWatch();
+</script>
 </body>
 </html>
