@@ -15,7 +15,6 @@
       --safe-right: env(safe-area-inset-right, 0px);
     }
     html,body{height:100%;margin:0;background:var(--bg);color:var(--txt);font:15px system-ui}
-    /* Desktop layout */
     .wrap{display:grid;grid-template-columns:1fr 360px;height:100%}
     #map{height:100%}
     aside{border-left:1px solid var(--line);background:var(--card);display:grid;grid-template-rows:auto 1fr auto}
@@ -25,6 +24,7 @@
     .btn.ghost{background:#222}
     .btn.save{background:#34c759;color:#000}
     .btn.danger{background:#ff3b30}
+    .btn.gray{background:#1c1c1e}
     .list{overflow:auto}
     .pin{padding:10px;border-bottom:1px solid var(--line);display:grid;gap:6px}
     .row{display:grid;grid-template-columns:1fr auto;gap:6px;align-items:center}
@@ -32,8 +32,6 @@
     .meta{opacity:.8;font-size:12px}
     .muted{opacity:.8}
     .note{padding:8px 10px;background:#0e0e0e;border-top:1px solid var(--line)}
-
-    /* Top overlay bar (mobile & desktop) */
     .topbar{
       position:fixed;left:0;right:0;top:0;padding:8px clamp(10px,4vw,16px);
       padding-top:calc(8px + var(--safe-top));
@@ -42,25 +40,17 @@
     }
     .topbar .cluster{display:flex;gap:8px;pointer-events:auto}
     .btn-lg{padding:12px 14px;border-radius:12px;font-weight:800}
-
-    /* Bottom sheet for phones */
     .sheet{display:none}
     .backdrop{display:none}
-
-    /* Mobile layout */
     @media (max-width: 820px){
       .wrap{grid-template-columns:1fr}
-      aside{display:none} /* replace with sheet */
+      aside{display:none}
       .topbar{gap:10px}
       .btn-lg{min-height:44px}
       .sheet{
-        display:block;
-        position:fixed;left:0;right:0;bottom:0;
-        background:var(--card);border-top:1px solid var(--line);
-        max-height:70vh;height:60vh;transform:translateY(100%);
-        transition:transform .28s ease; z-index:600;
-        padding-bottom:calc(10px + var(--safe-bot));
-        box-shadow:0 -10px 40px rgba(0,0,0,.4);
+        display:block;position:fixed;left:0;right:0;bottom:0;background:var(--card);border-top:1px solid var(--line);
+        max-height:70vh;height:60vh;transform:translateY(100%);transition:transform .28s ease; z-index:600;
+        padding-bottom:calc(10px + var(--safe-bot));box-shadow:0 -10px 40px rgba(0,0,0,.4);
         display:grid;grid-template-rows:auto 1fr auto;
       }
       .sheet.open{transform:translateY(0)}
@@ -72,11 +62,8 @@
         opacity:0;pointer-events:none;transition:opacity .2s ease;z-index:550
       }
       .backdrop.show{opacity:1;pointer-events:auto}
-      /* Give map breathing room under notch */
       #map{margin-top:calc(54px + var(--safe-top))}
     }
-
-    /* Make buttons tappable size */
     button{min-height:40px}
   </style>
 </head>
@@ -94,29 +81,19 @@
   <div class="wrap">
     <div id="map"></div>
 
-    <!-- Desktop sidebar -->
     <aside>
-      <header>
-        <strong>Pin Maker</strong>
-      </header>
+      <header><strong>Pin Maker</strong></header>
       <div class="list" id="pinList"></div>
-      <footer>
-        <div class="meta" id="status">Click map to add a pin (5-ft radius, non-overlapping).</div>
-      </footer>
-      <div class="note">
-        <div class="meta">Default GLB is used if a pin’s <code>model_url</code> is empty.</div>
-      </div>
+      <footer><div class="meta" id="status">Click map to add a pin (5-ft radius, non-overlapping).</div></footer>
+      <div class="note"><div class="meta">Default GLB is used if a pin’s <code>model_url</code> is empty.</div></div>
     </aside>
   </div>
 
-  <!-- Mobile bottom sheet -->
   <div class="backdrop" id="backdrop"></div>
   <div class="sheet" id="sheet">
     <header><strong>Pins</strong></header>
     <div class="list" id="pinListMobile"></div>
-    <footer>
-      <div class="meta" id="statusMobile">Tap map to add a pin (5-ft radius, non-overlap).</div>
-    </footer>
+    <footer><div class="meta" id="statusMobile">Tap map to add a pin (5-ft radius, non-overlap).</div></footer>
   </div>
 
   <script>
@@ -130,11 +107,11 @@
     const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
     const $ = s => document.querySelector(s);
 
-    // Desktop: very gentle wheel (≈2x less sensitive) & strict 1 step per nudge
+    // Desktop: make scroll zoom 5× less sensitive than before
     const map = L.map('map', {
       scrollWheelZoom: true,
-      wheelDebounceTime: 200,
-      wheelPxPerZoomLevel: 600,
+      wheelDebounceTime: 250,
+      wheelPxPerZoomLevel: 3000, // was 600
       zoomSnap: 1,
       zoomDelta: 1
     }).setView([40.7719, -73.9462], 14);
@@ -204,12 +181,24 @@
       return 2*R*Math.asin(Math.sqrt(A));
     }
 
-    // Status helper writes to desktop + mobile footers
     function setStatus(msg){
       const el1 = document.getElementById('status');
       const el2 = document.getElementById('statusMobile');
       if (el1) el1.textContent = msg;
       if (el2) el2.textContent = msg;
+    }
+
+    // --- Build geo1 deep-link for a pin ---
+    function buildGeoURL(p){
+      const base = new URL('geo1.html', location.origin);
+      base.searchParams.set('lat', p.lat.toFixed(6));
+      base.searchParams.set('lng', p.lng.toFixed(6));
+      base.searchParams.set('radius', (p.radius_m ?? PIN_RADIUS_M).toString());
+      if (p.track_title) base.searchParams.set('title', p.track_title);
+      if (p.model_url)  base.searchParams.set('glb',   p.model_url);
+      if (p.audio_url)  base.searchParams.set('audio', p.audio_url);
+      if (p.cover_url)  base.searchParams.set('cover', p.cover_url);
+      return base.toString();
     }
 
     // Load pins from DB
@@ -222,11 +211,9 @@
 
     // Draw markers + side/drawer lists
     function renderPins(){
-      // remove missing markers
       for (const [id, m] of state.markers.entries()){
         if (!state.pins.find(p=>p.id===id)) { map.removeLayer(m); state.markers.delete(id); }
       }
-      // add/update markers
       state.pins.forEach(p=>{
         if (!state.markers.has(p.id)){
           const marker = L.marker([p.lat,p.lng], {draggable:true}).addTo(map);
@@ -245,11 +232,10 @@
         }
       });
 
-      // render both lists
       const desktop = document.getElementById('pinList');
-      const mobile = document.getElementById('pinListMobile');
+      const mobile  = document.getElementById('pinListMobile');
       if (desktop) desktop.innerHTML = '';
-      if (mobile) mobile.innerHTML = '';
+      if (mobile)  mobile.innerHTML = '';
 
       const buildRow = (p) => {
         const row = document.createElement('div');
@@ -257,7 +243,8 @@
         row.innerHTML = `
           <div class="row">
             <input type="text" class="name" value="${p.name||''}" placeholder="Street · time" />
-            <div style="display:flex;gap:6px">
+            <div style="display:flex;gap:6px;flex-wrap:wrap">
+              <button class="btn" data-find>Find</button>
               <button class="btn save">Save</button>
               <button class="btn danger del">Delete</button>
             </div>
@@ -270,19 +257,28 @@
           <div class="row"><input type="text" class="model"  placeholder="Model URL (GLB optional)"  value="${p.model_url||''}"></div>
           <div class="meta muted">Drag the marker to adjust. Changes save when you hit <b>Save</b>.</div>
         `;
-        // SAVE button (explicit commit)
+
+        // FIND button → open geo1 with this pin’s params
+        row.querySelector('[data-find]').onclick = () => {
+          const url = buildGeoURL(p);
+          // same tab for quick testing; switch to window.open(url, '_blank') if you want a new tab
+          location.href = url;
+        };
+
+        // SAVE button
         row.querySelector('.save').onclick = async () => {
           const patch = {
-            name:        row.querySelector('.name').value,
-            track_title: row.querySelector('.title').value,
-            track_artist:row.querySelector('.artist').value,
-            cover_url:   row.querySelector('.cover').value,
-            audio_url:   row.querySelector('.audio').value,
-            model_url:   row.querySelector('.model').value
+            name:         row.querySelector('.name').value,
+            track_title:  row.querySelector('.title').value,
+            track_artist: row.querySelector('.artist').value,
+            cover_url:    row.querySelector('.cover').value,
+            audio_url:    row.querySelector('.audio').value,
+            model_url:    row.querySelector('.model').value
           };
           await updatePin(p.id, patch);
           alert('Pin saved!');
         };
+
         // DELETE button
         row.querySelector('.del').onclick = async ()=>{
           if (!confirm('Delete this pin?')) return;
@@ -293,7 +289,6 @@
         return row;
       };
 
-      // build fresh nodes for each list so handlers are unique
       state.pins.forEach(p=>{
         if (desktop) desktop.appendChild(buildRow(p));
         if (mobile)  mobile.appendChild(buildRow(p));
@@ -304,21 +299,16 @@
       return state.pins.some(p=>{
         if (ignoreId && p.id===ignoreId) return false;
         const d = distMeters(lat,lng,p.lat,p.lng);
-        const min = (p.radius_m||PIN_RADIUS_M) + PIN_RADIUS_M; // 5ft + 5ft
+        const min = (p.radius_m||PIN_RADIUS_M) + PIN_RADIUS_M;
         return d < min;
       });
     }
 
-    // Add pin on map click (with confirm)
     map.on('click', async (e)=>{
       const {lat,lng} = e.latlng;
-      if (wouldOverlap(lat,lng)) {
-        setStatus('Too close to an existing pin (needs ≥ ~10 ft center-to-center).');
-        return;
-      }
+      if (wouldOverlap(lat,lng)) { setStatus('Too close to an existing pin (needs ≥ ~10 ft).'); return; }
       const ok = confirm(`Add a pin here?\n${lat.toFixed(6)}, ${lng.toFixed(6)}`);
       if (!ok) return;
-
       const name = autoName(lat,lng);
       const {data, error} = await sb.from('pins').insert({
         name, lat, lng, radius_m: PIN_RADIUS_M,
@@ -339,17 +329,14 @@
 
     async function updatePin(id, patch){
       const {data, error} = await sb.from('pins').update(patch).eq('id', id).select().single();
-      if(error){
-        alert('Save failed: ' + error.message);
-        return;
-      }
+      if(error){ alert('Save failed: ' + error.message); return; }
       const idx = state.pins.findIndex(x=>x.id===id);
       if (idx >= 0) state.pins[idx] = {...state.pins[idx], ...(data || patch)};
       renderPins();
       setStatus('Saved.');
     }
 
-    // Buttons
+    // Topbar buttons
     $('#openViewer').onclick = ()=> location.href = 'geo1.html';
     $('#locateMe').onclick = snapToMyLocation;
 
